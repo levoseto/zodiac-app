@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="ZodiacApp.Views.MainPage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ZodiacApp.ViewModels"
+             xmlns:models="clr-namespace:ZodiacApp.Models"
+             x:DataType="viewmodels:MainViewModel"
+             Shell.NavBarIsVisible="True"
+             Title="Zodiac App">
+
+    <Shell.TitleView>
+        <Grid ColumnDefinitions="*,Auto">
+            <Label Grid.Column="0" 
+                   Text="Zodiac App ✨" 
+                   FontSize="20" 
+                   FontAttributes="Bold"
+                   TextColor="White"
+                   VerticalOptions="Center"/>
+
+            <Button Grid.Column="1"
+                    Text="🔄"
+                    BackgroundColor="Transparent"
+                    TextColor="White"
+                    FontSize="18"
+                    Command="{Binding CheckForUpdatesCommand}"
+                    ToolTipProperties.Text="Verificar actualizaciones"/>
+        </Grid>
+    </Shell.TitleView>
+
+    <ScrollView>
+        <StackLayout Padding="20" Spacing="20">
+
+            <!-- Header -->
+            <Frame BackgroundColor="{StaticResource Primary}" 
+                   CornerRadius="15" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="{Binding WelcomeMessage}" 
+                           FontSize="24" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           TextColor="White"/>
+
+                    <Label Text="{Binding CurrentVersion, StringFormat='Versión: {0}'}" 
+                           FontSize="12" 
+                           HorizontalOptions="Center"
+                           TextColor="LightGray"
+                           Margin="0,5,0,0"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Update Available Banner -->
+            <Frame IsVisible="{Binding HasUpdateAvailable}"
+                   BackgroundColor="Orange"
+                   CornerRadius="10"
+                   Padding="15"
+                   HasShadow="True">
+                <Grid ColumnDefinitions="*,Auto">
+                    <StackLayout Grid.Column="0">
+                        <Label Text="¡Actualización disponible!" 
+                               FontAttributes="Bold"
+                               TextColor="White"/>
+                        <Label Text="{Binding LatestVersion, StringFormat='Nueva versión: {0}'}" 
+                               FontSize="12"
+                               TextColor="White"/>
+                    </StackLayout>
+
+                    <Button Grid.Column="1"
+                            Text="Actualizar"
+                            BackgroundColor="White"
+                            TextColor="Orange"
+                            FontSize="12"
+                            Padding="10,5"
+                            CornerRadius="5"
+                            Command="{Binding GoToUpdatePageCommand}"/>
+                </Grid>
+            </Frame>
+
+            <!-- Date Picker -->
+            <Frame BackgroundColor="White" 
+                   CornerRadius="10" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="Selecciona tu fecha de nacimiento:" 
+                           FontSize="16" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           Margin="0,0,0,10"/>
+
+                    <DatePicker Date="{Binding SelectedDate}" 
+                                FontSize="18"
+                                HorizontalOptions="Center"
+                                Format="dd/MM/yyyy"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Zodiac Result -->
+            <Frame IsVisible="{Binding CurrentSign, Converter={StaticResource IsNotNullConverter}}"
+                   BackgroundColor="LightBlue"
+                   CornerRadius="15" 
+                   Padding="25"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="{Binding CurrentSign.Symbol}" 
+                           FontSize="60" 
+                           HorizontalOptions="Center"
+                           TextColor="White"/>
+
+                    <Label Text="{Binding CurrentSign.Name}" 
+                           FontSize="32" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           TextColor="White"/>
+
+                    <Label Text="{Binding CurrentSign.Dates}" 
+                           FontSize="16" 
+                           HorizontalOptions="Center"
+                           TextColor="White"
+                           Margin="0,5,0,0"/>
+
+                    <Label Text="{Binding CurrentSign.Element, StringFormat='Elemento: {0}'}" 
+                           FontSize="14" 
+                           HorizontalOptions="Center"
+                           TextColor="White"
+                           FontAttributes="Italic"
+                           Margin="0,10,0,0"/>
+
+                    <Label Text="{Binding CurrentSign.Description}" 
+                           FontSize="14" 
+                           HorizontalOptions="Center"
+                           TextColor="White"
+                           HorizontalTextAlignment="Center"
+                           Margin="0,10,0,0"/>
+
+                    <Button Text="Ver más información" 
+                            BackgroundColor="White"
+                            TextColor="DarkBlue"
+                            CornerRadius="20"
+                            Padding="20,10"
+                            Margin="0,15,0,0"
+                            Command="{Binding ShowZodiacInfoCommand}"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Loading Indicator -->
+            <ActivityIndicator IsVisible="{Binding IsLoading}" 
+                              IsRunning="{Binding IsLoading}"
+                              Color="{StaticResource Primary}"
+                              Scale="1.5"
+                              HorizontalOptions="Center"/>
+
+            <!-- Quick Access to All Signs -->
+            <Frame BackgroundColor="LightGray" 
+                   CornerRadius="10" 
+                   Padding="15"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="Todos los signos del zodíaco:" 
+                           FontSize="16" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           Margin="0,0,0,10"/>
+
+                    <CollectionView ItemsSource="{Binding AllZodiacSigns}"
+                                   ItemsLayout="VerticalGrid, 4">
+                        <CollectionView.ItemTemplate>
+                            <DataTemplate x:DataType="models:ZodiacSign">
+                                <StackLayout Padding="10" HorizontalOptions="Center">
+                                    <Label Text="{Binding Symbol}" 
+                                           FontSize="24" 
+                                           HorizontalOptions="Center"/>
+                                    <Label Text="{Binding Name}" 
+                                           FontSize="10" 
+                                           HorizontalOptions="Center"
+                                           HorizontalTextAlignment="Center"/>
+                                </StackLayout>
+                            </DataTemplate>
+                        </CollectionView.ItemTemplate>
+                    </CollectionView>
+                </StackLayout>
+            </Frame>
+
+        </StackLayout>
+    </ScrollView>
+</ContentPage>

@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<ContentPage x:Class="ZodiacApp.Views.UpdatePage"
+             xmlns="http://schemas.microsoft.com/dotnet/2021/maui"
+             xmlns:x="http://schemas.microsoft.com/winfx/2009/xaml"
+             xmlns:viewmodels="clr-namespace:ZodiacApp.ViewModels"
+             x:DataType="viewmodels:UpdateViewModel"
+             Title="Actualización">
+
+    <ScrollView>
+        <StackLayout Padding="20" Spacing="20">
+
+            <!-- Header -->
+            <Frame BackgroundColor="{StaticResource Primary}" 
+                   CornerRadius="15" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="🔄 Actualización de la App" 
+                           FontSize="24" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           TextColor="White"/>
+
+                    <Label Text="{Binding CurrentVersion, StringFormat='Versión actual: {0}'}" 
+                           FontSize="14" 
+                           HorizontalOptions="Center"
+                           TextColor="LightGray"
+                           Margin="0,5,0,0"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Status Message -->
+            <Frame BackgroundColor="White" 
+                   CornerRadius="10" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="Estado:" 
+                           FontSize="16" 
+                           FontAttributes="Bold"
+                           Margin="0,0,0,10"/>
+
+                    <Label Text="{Binding StatusMessage}" 
+                           FontSize="16"
+                           HorizontalTextAlignment="Center"
+                           TextColor="{StaticResource Primary}"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Update Info (when available) -->
+            <Frame IsVisible="{Binding HasUpdate}"
+                   BackgroundColor="LightBlue"
+                   CornerRadius="10" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout IsVisible="{Binding LatestVersion, Converter={StaticResource IsNotNullConverter}}">
+                    <Label Text="📱 Nueva versión disponible" 
+                           FontSize="18" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           Margin="0,0,0,15"/>
+
+                    <Grid RowDefinitions="Auto,Auto,Auto,Auto" 
+                          ColumnDefinitions="Auto,*"
+                          RowSpacing="8">
+
+                        <Label Grid.Row="0" Grid.Column="0" 
+                               Text="Versión:" 
+                               FontAttributes="Bold"/>
+                        <Label Grid.Row="0" Grid.Column="1" 
+                               Text="{Binding LatestVersion.Version}"/>
+
+                        <Label Grid.Row="1" Grid.Column="0" 
+                               Text="Tamaño:" 
+                               FontAttributes="Bold"/>
+                        <Label Grid.Row="1" Grid.Column="1" 
+                               Text="{Binding LatestVersion.FileSize, Converter={StaticResource BytesToStringConverter}}"/>
+
+                        <Label Grid.Row="2" Grid.Column="0" 
+                               Text="Fecha:" 
+                               FontAttributes="Bold"/>
+                        <Label Grid.Row="2" Grid.Column="1" 
+                               Text="{Binding LatestVersion.UploadDate, StringFormat='{0:dd/MM/yyyy HH:mm}'}"/>
+
+                        <Label Grid.Row="3" Grid.Column="0" 
+                               Text="Android mínimo:" 
+                               FontAttributes="Bold"/>
+                        <Label Grid.Row="3" Grid.Column="1" 
+                               Text="{Binding LatestVersion.MinAndroidVersion}"/>
+                    </Grid>
+
+                    <Label Text="Notas de la versión:" 
+                           FontAttributes="Bold"
+                           Margin="0,15,0,5"/>
+                    <Label Text="{Binding LatestVersion.ReleaseNotes}" 
+                           BackgroundColor="White"
+                           Padding="10"
+                           TextColor="Black"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Download Progress -->
+            <Frame IsVisible="{Binding IsDownloading}"
+                   BackgroundColor="Orange"
+                   CornerRadius="10" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="📥 Descargando actualización..." 
+                           FontSize="16" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           TextColor="White"
+                           Margin="0,0,0,15"/>
+
+                    <ProgressBar Progress="{Binding DownloadProgress, Converter={StaticResource PercentToDecimalConverter}}"
+                                ProgressColor="White"
+                                BackgroundColor="DarkOrange"
+                                HeightRequest="20"/>
+
+                    <Label Text="{Binding DownloadProgressText}" 
+                           HorizontalOptions="Center"
+                           TextColor="White"
+                           FontSize="18"
+                           FontAttributes="Bold"
+                           Margin="0,10,0,0"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Installing -->
+            <Frame IsVisible="{Binding IsInstalling}"
+                   BackgroundColor="Green"
+                   CornerRadius="10" 
+                   Padding="20"
+                   HasShadow="True">
+                <StackLayout>
+                    <Label Text="⚙️ Instalando actualización..." 
+                           FontSize="16" 
+                           FontAttributes="Bold"
+                           HorizontalOptions="Center"
+                           TextColor="White"/>
+
+                    <ActivityIndicator IsRunning="{Binding IsInstalling}"
+                                      Color="White"
+                                      Scale="1.5"
+                                      Margin="0,15,0,0"/>
+                </StackLayout>
+            </Frame>
+
+            <!-- Action Buttons -->
+            <StackLayout Spacing="15">
+
+                <Button Text="🔍 Verificar actualizaciones"
+                        Command="{Binding CheckForUpdatesCommand}"
+                        BackgroundColor="{StaticResource Primary}"
+                        TextColor="White"
+                        CornerRadius="25"
+                        HeightRequest="50"/>
+
+                <Button Text="⬇️ Descargar actualización"
+                        Command="{Binding DownloadUpdateCommand}"
+                        IsVisible="{Binding CanDownload}"
+                        BackgroundColor="Green"
+                        TextColor="White"
+                        CornerRadius="25"
+                        HeightRequest="50"/>
+
+                <Button Text="❌ Cancelar descarga"
+                        Command="{Binding CancelDownloadCommand}"
+                        IsVisible="{Binding CanCancel}"
+                        BackgroundColor="Red"
+                        TextColor="White"
+                        CornerRadius="25"
+                        HeightRequest="50"/>
+
+                <Button Text="📱 Instalar ahora"
+                        Command="{Binding InstallUpdateCommand}"
+                        IsVisible="{Binding CanInstall}"
+                        BackgroundColor="DarkGreen"
+                        TextColor="White"
+                        CornerRadius="25"
+                        HeightRequest="50"/>
+            </StackLayout>
+
+            <!-- Back Button -->
+            <Button Text="⬅️ Volver al inicio"
+                    Command="{Binding Source={RelativeSource AncestorType={x:Type ContentPage}}, Path=BindingContext.GoBackCommand}"
+                    BackgroundColor="Gray"
+                    TextColor="White"
+                    CornerRadius="25"
+                    HeightRequest="45"
+                    Margin="0,20,0,0"/>
+
+        </StackLayout>
+    </ScrollView>
+</ContentPage>
