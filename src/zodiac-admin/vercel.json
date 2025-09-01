@@ -84,15 +84,6 @@
       "destination": "/index.html"
     }
   ],
-  "functions": {
-    "app/server/index.js": {
-      "includeFiles": "{app,public}/**"
-    }
-  },
-  "env": {
-    "VITE_APP_NAME": "Zodiac App Updater Admin",
-    "VITE_APP_VERSION": "1.0.0"
-  },
   "regions": ["iad1"],
   "cleanUrls": true,
   "trailingSlash": false
