@@ -1,0 +1,171 @@
+# Zodiac App Updater - Administrador Web
+
+Administrador web construido con Vue 3 para gestionar la distribución de versiones de la aplicación móvil Zodiac App mediante HTTP.
+
+## 🚀 Características
+
+- **Dashboard**: Estadísticas generales y información de la última versión
+- **Gestión de Versiones**: Lista, descarga y eliminación de versiones APK
+- **Subida de APK**: Formulario completo para subir nuevas versiones con drag & drop
+- **Estado de API**: Monitoreo en tiempo real del estado de la API
+- **Diseño Responsive**: Funciona perfectamente en móviles y escritorio
+
+## 🛠️ Tecnologías Utilizadas
+
+- **Vue 3** - Framework progresivo de JavaScript
+- **Vite** - Build tool rápido para desarrollo
+- **Axios** - Cliente HTTP para llamadas a la API
+- **CSS3** - Estilos modernos con gradientes y glassmorphism
+- **Font Awesome** - Iconografía
+
+## 📦 Instalación
+
+### Prerrequisitos
+
+- Node.js 16+ 
+- npm o yarn
+
+### Pasos de instalación
+
+1. **Clona el repositorio**
+   ```bash
+   git clone <tu-repositorio>
+   cd zodiac-admin
+   ```
+
+2. **Instala las dependencias**
+   ```bash
+   npm install
+   ```
+
+3. **Configura las variables de entorno**
+   ```bash
+   cp .env.example .env
+   ```
+   Edita el archivo `.env` con tu URL de API:
+   ```env
+   VITE_API_URL=http://localhost:3000
+   ```
+
+4. **Ejecuta en modo desarrollo**
+   ```bash
+   npm run dev
+   ```
+
+5. **Construye para producción**
+   ```bash
+   npm run build
+   ```
+
+## 🏗️ Estructura del Proyecto
+
+```
+zodiac-admin/
+├── public/
+├── src/
+│   ├── assets/
+│   │   └── styles/
+│   │       └── main.css              # Estilos globales
+│   ├── components/
+│   │   ├── AlertMessage.vue          # Componente de alertas
+│   │   ├── AppHeader.vue             # Encabezado de la aplicación
+│   │   ├── DashboardTab.vue          # Tab del dashboard
+│   │   ├── NavTabs.vue               # Navegación por tabs
+│   │   ├── StatusCard.vue            # Tarjeta de estado de API
+│   │   ├── UploadTab.vue             # Tab de subida de APK
+│   │   └── VersionsTab.vue           # Tab de gestión de versiones
+│   ├── services/
+│   │   └── ApiService.js             # Servicio para llamadas a la API
+│   ├── utils/
+│   │   └── formatters.js             # Utilidades de formato
+│   ├── App.vue                       # Componente principal
+│   └── main.js                       # Punto de entrada
+├── .env.example                      # Variables de entorno de ejemplo
+├── index.html                        # HTML principal
+├── package.json                      # Dependencias y scripts
+├── vite.config.js                    # Configuración de Vite
+└── README.md                         # Este archivo
+```
+
+## 🔌 Integración con la API
+
+El administrador consume los siguientes endpoints de tu REST API:
+
+- `GET /api/health` - Estado de la API
+- `GET /api/versions` - Lista de todas las versiones
+- `GET /api/version/latest` - Última versión disponible
+- `POST /api/upload` - Subir nueva versión APK
+- `DELETE /api/version/:version` - Eliminar versión
+- `GET /api/download/:version` - Descargar APK
+
+## 🎯 Funcionalidades Principales
+
+### Dashboard
+- Número total de versiones
+- Información de la última versión
+- Tamaño total de todos los APK
+- Acceso directo a descarga
+
+### Gestión de Versiones
+- Lista completa de versiones con metadatos
+- Botón de descarga para cada versión
+- Eliminación segura con confirmación
+- Actualización manual de la lista
+
+### Subida de APK
+- Formulario con validación de formato semver
+- Drag & Drop para archivos APK
+- Barra de progreso durante la subida
+- Validación de tamaño (máx. 100MB)
+- Campos para metadatos de la versión
+
+## 🚀 Despliegue en Vercel
+
+1. **Sube el código a GitHub**
+
+2. **Conecta con Vercel**
+   - Ve a [vercel.com](https://vercel.com)
+   - Importa tu repositorio de GitHub
+
+3. **Configura variables de entorno**
+   - En el dashboard de Vercel, ve a Settings > Environment Variables
+   - Agrega: `VITE_API_URL` con el valor de tu API en producción
+
+4. **Deploy automático**
+   - Vercel construirá y desplegará automáticamente
+   - Cada push a la rama principal activará un nuevo deploy
+
+## 🔧 Configuración de Desarrollo
+
+### Scripts disponibles
+
+```bash
+npm run dev      # Servidor de desarrollo
+npm run build    # Construir para producción
+npm run preview  # Vista previa de la build de producción
+npm run lint     # Linter de código
+```
+
+### Variables de entorno
+
+- `VITE_API_URL`: URL base de tu API REST (requerida)
+
+## 📱 Compatibilidad
+
+- **Navegadores**: Chrome 85+, Firefox 80+, Safari 14+, Edge 85+
+- **Dispositivos**: Responsive design para móviles y tablets
+- **Resoluciones**: Optimizado desde 320px hasta 4K
+
+## 🤝 Integración con la API Node.js
+
+Este administrador está diseñado para trabajar con la REST API de Node.js/Express que maneja:
+
+- Almacenamiento de APK por versiones en carpetas organizadas
+- Base de datos MongoDB con esquema de versiones
+- Validación semver y metadatos de versiones
+- Rate limiting y seguridad con Helmet
+- Subida de archivos con Multer
+
+## 📄 Licencia
+
+Este proyecto es parte del sistema Zodiac App Updater para distribución privada de aplicaciones móviles Android.
