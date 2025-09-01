@@ -1,0 +1,51 @@
+# Dependencies
+node_modules
+.npm
+.pnpm-debug.log*
+
+# Environment files
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+
+# Build output (already handled by outputDirectory)
+dist
+*.tsbuildinfo
+
+# IDE files
+.vscode
+.idea
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Logs
+logs
+*.log
+
+# Cache
+.cache
+.parcel-cache
+
+# Testing
+coverage
+.nyc_output
+
+# Documentation
+docs
+README.md
+CHANGELOG.md
+
+# Git
+.git
+.gitignore
+
+# Development tools
+.eslintcache
