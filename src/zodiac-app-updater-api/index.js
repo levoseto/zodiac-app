@@ -10,9 +10,8 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-// AWS SDK v3 - Importaciones modulares (agregar getSignedUrl)
+// AWS SDK v3 - Importaciones modulares
 const { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
-const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -28,22 +27,10 @@ const s3Client = new S3Client({
 
 const S3_BUCKET = process.env.S3_BUCKET_NAME || 'zodiac-app-apks';
 
-// Configuración CORS súper permisiva - PERMITE TODO
-const corsOptions = {
-  origin: '*', // Permitir TODOS los orígenes
-  credentials: false, // No usar credentials con origin: '*'
-  methods: '*', // Permitir TODOS los métodos
-  allowedHeaders: '*', // Permitir TODOS los headers
-  exposedHeaders: '*', // Exponer todos los headers
-  optionsSuccessStatus: 200
-};
-
 // Middleware de seguridad y optimización
-app.use(helmet({
-  crossOriginEmbedderPolicy: false, // Importante para archivos grandes
-}));
+app.use(helmet());
 app.use(compression());
-app.use(cors(corsOptions));
+app.use(cors());
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 
@@ -53,23 +40,6 @@ const limiter = rateLimit({
   max: 100 // límite de 100 requests por ventana de tiempo
 });
 app.use('/api/', limiter);
-
-// Middleware súper permisivo para preflight requests
-app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', '*');
-  res.header('Access-Control-Allow-Headers', '*');
-  res.header('Access-Control-Max-Age', '86400');
-  res.sendStatus(200);
-});
-
-// Middleware global para agregar headers CORS a todas las respuestas
-app.use((req, res, next) => {
-  res.header('Access-Control-Allow-Origin', '*');
-  res.header('Access-Control-Allow-Methods', '*');
-  res.header('Access-Control-Allow-Headers', '*');
-  next();
-});
 
 // Conexión a MongoDB
 mongoose.connect(process.env.MONGODB_URI || 'mongodb+srv://anubis:pinotepa1A@levocluster0.pdrulcd.mongodb.net/zodiac-updater?retryWrites=true&w=majority', {
@@ -245,7 +215,7 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3A. Generar URL firmada para upload directo a S3 (CORREGIDO)
+// 3A. Generar URL firmada para upload directo a S3 
 app.post('/api/upload/presigned', async (req, res) => {
   try {
     // Headers CORS
@@ -254,7 +224,6 @@ app.post('/api/upload/presigned', async (req, res) => {
     res.header('Access-Control-Allow-Headers', '*');
     
     const { version, fileSize, fileName } = req.body;
-
     console.log('📋 Request presigned URL:', { version, fileSize, fileName });
 
     if (!version || !semver.valid(version)) {
@@ -281,7 +250,6 @@ app.post('/api/upload/presigned', async (req, res) => {
       Key: s3Key,
       ContentType: 'application/vnd.android.package-archive',
       ContentDisposition: `attachment; filename="zodiac-app-v${version}.apk"`,
-      // NO incluir Body aquí para URL presignada
       Metadata: {
         'version': version,
         'upload-date': new Date().toISOString(),
@@ -295,10 +263,9 @@ app.post('/api/upload/presigned', async (req, res) => {
       expiresIn: 900 // 15 minutos
     });
 
-    console.log(`🔗 URL presignada generada para APK v${version}:`);
+    console.log(`🔗 URL presignada generada para APK v${version}`);
     console.log(`   Bucket: ${S3_BUCKET}`);
     console.log(`   Key: ${s3Key}`);
-    console.log(`   URL: ${presignedUrl.substring(0, 100)}...`);
 
     res.json({
       success: true,
@@ -308,7 +275,7 @@ app.post('/api/upload/presigned', async (req, res) => {
         s3Bucket: S3_BUCKET,
         version: version,
         expiresIn: 900, // segundos
-        uploadMethod: 'PUT', // Método HTTP a usar
+        uploadMethod: 'PUT',
         contentType: 'application/vnd.android.package-archive'
       }
     });
@@ -321,12 +288,108 @@ app.post('/api/upload/presigned', async (req, res) => {
     });
   }
 });
-app.post('/api/upload', upload.single('apk'), async (req, res) => {
+
+// 3B. Confirmar que el upload directo a S3 fue exitoso (VERSIÓN MEJORADA)
+app.post('/api/upload/confirm', async (req, res) => {
   try {
-    // Headers súper permisivos
+    // Headers CORS
     res.header('Access-Control-Allow-Origin', '*');
     res.header('Access-Control-Allow-Methods', '*');
     res.header('Access-Control-Allow-Headers', '*');
+    
+    const { version, s3Key, s3Bucket, fileSize, fileName, releaseNotes, minAndroidVersion, targetSdkVersion } = req.body;
+    
+    console.log('📋 Confirmando upload:', { version, s3Key, s3Bucket, fileSize });
+    
+    // Validación mejorada de datos requeridos
+    if (!version || !s3Key || !s3Bucket || !fileSize) {
+      return res.status(400).json({
+        success: false,
+        message: 'Datos incompletos para confirmar upload',
+        missing: {
+          version: !version,
+          s3Key: !s3Key,
+          s3Bucket: !s3Bucket,
+          fileSize: !fileSize
+        }
+      });
+    }
+
+    // Verificar que el archivo realmente existe en S3
+    try {
+      const headObjectCommand = new HeadObjectCommand({
+        Bucket: s3Bucket,
+        Key: s3Key
+      });
+      const s3Response = await s3Client.send(headObjectCommand);
+      console.log(`✅ Confirmado: APK v${version} existe en S3`);
+      console.log(`   Tamaño en S3: ${s3Response.ContentLength} bytes`);
+      console.log(`   Content-Type: ${s3Response.ContentType}`);
+      console.log(`   Last Modified: ${s3Response.LastModified}`);
+    } catch (s3Error) {
+      console.error('❌ Archivo no encontrado en S3:', s3Error.message);
+      return res.status(404).json({
+        success: false,
+        message: 'Upload a S3 no fue exitoso - archivo no encontrado',
+        s3Error: s3Error.message,
+        s3Key: s3Key,
+        s3Bucket: s3Bucket
+      });
+    }
+
+    // Generar URL pública
+    const s3Url = generateS3Url(s3Bucket, s3Key);
+
+    // Guardar en base de datos
+    const newVersion = new AppVersion({
+      version,
+      releaseNotes: releaseNotes || '',
+      apkFileName: fileName || `zodiac-app-v${version}.apk`,
+      apkPath: s3Url,
+      s3Key: s3Key,
+      s3Bucket: s3Bucket,
+      fileSize: parseInt(fileSize),
+      minAndroidVersion: minAndroidVersion || '5.0',
+      targetSdkVersion: parseInt(targetSdkVersion) || 33
+    });
+
+    await newVersion.save();
+
+    const fileSizeMB = (fileSize / 1024 / 1024).toFixed(2);
+    console.log(`✅ APK v${version} confirmado y registrado en BD (${fileSizeMB}MB)`);
+
+    res.status(201).json({
+      success: true,
+      message: 'Upload directo a S3 confirmado exitosamente',
+      method: 'direct-s3-upload',
+      data: {
+        version: newVersion.version,
+        fileSize: newVersion.fileSize,
+        fileSizeMB: fileSizeMB,
+        uploadDate: newVersion.uploadDate,
+        downloadUrl: `/api/download/${version}`,
+        s3Url: s3Url,
+        s3Key: s3Key,
+        s3Bucket: s3Bucket
+      }
+    });
+  } catch (error) {
+    console.error('Error confirmando upload:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error confirmando upload',
+      error: error.message
+    });
+  }
+});
+
+// 3. Subir nueva versión del APK con AWS S3 SDK v3 (MÉTODO ANTERIOR - MANTENER PARA ARCHIVOS PEQUEÑOS)
+app.post('/api/upload', upload.single('apk'), async (req, res) => {
+  try {
+    // Headers adicionales para CORS y archivos grandes
+    res.header('Access-Control-Allow-Origin', req.headers.origin);
+    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
+    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
     
     if (!req.file) {
       return res.status(400).json({

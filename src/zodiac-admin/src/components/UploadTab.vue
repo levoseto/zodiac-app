@@ -2,7 +2,7 @@
   <div class="content-card">
     <h2><i class="fas fa-upload"></i> Subir Nueva Versión</h2>
     
-    <!-- Connection Test Section - Simplificado -->
+    <!-- Connection Test Section -->
     <div class="connection-test-section" style="margin-bottom: 30px;">
       <button @click="testApiConnection" class="btn btn-primary" :disabled="testingConnection">
         <i v-if="testingConnection" class="fas fa-spinner fa-spin"></i>
@@ -36,6 +36,7 @@
           placeholder="1.0.0"
           pattern="^\d+\.\d+\.\d+$"
           required
+          :disabled="uploading"
         >
       </div>
 
@@ -47,6 +48,7 @@
           class="form-control" 
           rows="4"
           placeholder="Describe los cambios y mejoras de esta versión..."
+          :disabled="uploading"
         ></textarea>
       </div>
 
@@ -58,6 +60,7 @@
           v-model="form.minAndroidVersion" 
           class="form-control" 
           placeholder="5.0"
+          :disabled="uploading"
         >
       </div>
 
@@ -69,6 +72,7 @@
           v-model="form.targetSdkVersion" 
           class="form-control" 
           placeholder="33"
+          :disabled="uploading"
         >
       </div>
 
@@ -76,20 +80,20 @@
         <label>Archivo APK</label>
         <div 
           class="file-upload"
-          @click="$refs.fileInput.click()"
-          @dragover.prevent="dragOver = true"
+          @click="!uploading && $refs.fileInput.click()"
+          @dragover.prevent="!uploading && (dragOver = true)"
           @dragleave="dragOver = false"
-          @drop.prevent="handleFileDrop"
-          :class="{ dragover: dragOver }"
+          @drop.prevent="!uploading && handleFileDrop"
+          :class="{ dragover: dragOver, disabled: uploading }"
         >
           <div v-if="!form.file">
             <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; color: #667eea; margin-bottom: 10px;"></i>
             <p><strong>Haz clic aquí</strong> o arrastra el archivo APK</p>
-            <p style="color: #666; font-size: 0.9rem;">Máximo 200MB - Almacenamiento directo en AWS S3</p>
+            <p style="color: #666; font-size: 0.9rem;">Máximo 200MB - Upload directo a AWS S3</p>
             <div class="upload-features">
-              <small><i class="fas fa-check"></i> Sin restricciones CORS</small> |
-              <small><i class="fas fa-check"></i> Upload directo</small> |
-              <small><i class="fab fa-aws"></i> S3 SDK v3</small>
+              <small><i class="fas fa-check"></i> Sin limitaciones de Vercel</small> |
+              <small><i class="fas fa-check"></i> URLs presignadas</small> |
+              <small><i class="fab fa-aws"></i> S3 directo</small>
             </div>
           </div>
           <div v-else>
@@ -97,9 +101,9 @@
             <p><strong>{{ form.file.name }}</strong></p>
             <div class="file-details">
               <p><i class="fas fa-weight-hanging"></i> {{ formatFileSize(form.file.size) }}</p>
-              <p><i class="fab fa-aws"></i> Listo para subir a S3</p>
+              <p><i class="fab fa-aws"></i> Listo para upload directo a S3</p>
             </div>
-            <button type="button" @click.stop="form.file = null" class="btn btn-danger" style="margin-top: 10px;">
+            <button v-if="!uploading" type="button" @click.stop="removeFile" class="btn btn-danger" style="margin-top: 10px;">
               <i class="fas fa-times"></i> Remover
             </button>
           </div>
@@ -110,14 +114,15 @@
           @change="handleFileSelect" 
           accept=".apk"
           style="display: none;"
+          :disabled="uploading"
         >
       </div>
 
       <!-- Progress Section para Upload Directo a S3 -->
-      <div v-if="uploadProgress > 0 && uploadProgress < 100" class="form-group">
+      <div v-if="uploadProgress > 0" class="form-group">
         <label>
           <i class="fab fa-aws"></i> Upload Directo a AWS S3
-          <span v-if="uploadSpeed" class="upload-speed">{{ uploadSpeed }} MB/s</span>
+          <span v-if="uploadSpeed && uploadProgress < 100" class="upload-speed">{{ uploadSpeed }} MB/s</span>
         </label>
         <div class="progress-container">
           <div class="progress-bar">
@@ -125,56 +130,57 @@
           </div>
           <div class="progress-info">
             <span class="progress-percent">{{ uploadProgress }}%</span>
-            <span v-if="estimatedTime" class="progress-eta">ETA: {{ estimatedTime }}</span>
+            <span v-if="estimatedTime && uploadProgress < 100" class="progress-eta">ETA: {{ estimatedTime }}</span>
           </div>
         </div>
         <div class="upload-steps" style="margin-top: 10px;">
-          <small v-if="uploadProgress < 10">📡 Obteniendo URL presignada...</small>
-          <small v-else-if="uploadProgress < 95">📤 Subiendo directo a S3...</small>
-          <small v-else>💾 Confirmando en base de datos...</small>
+          <small v-if="uploadProgress < 5">📡 Obteniendo URL presignada...</small>
+          <small v-else-if="uploadProgress < 95">📤 Subiendo directo a S3 (sin pasar por Vercel)...</small>
+          <small v-else-if="uploadProgress < 100">💾 Confirmando en base de datos...</small>
+          <small v-else class="success-message">✅ Upload directo completado exitosamente</small>
         </div>
       </div>
 
-      <!-- Success Message Mejorado -->
-      <div v-if="uploadProgress === 100" class="upload-complete" style="margin-bottom: 20px;">
-        <i class="fas fa-check-circle"></i>
-        <strong>Upload directo a AWS S3 completado!</strong>
-        <br>
-        <small>Archivo subido directamente sin pasar por Vercel</small>
-      </div>
-
-      <!-- API Info Section -->
-      <div class="api-info" style="margin-bottom: 20px; padding: 15px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #4caf50;">
-        <h4><i class="fas fa-rocket"></i> Upload Directo a S3</h4>
-        <ul style="margin: 10px 0; padding-left: 20px;">
-          <li>✅ <strong>Sin límites de Vercel</strong> - Upload directo a AWS S3</li>
-          <li>✅ <strong>URLs presignadas</strong> - Seguridad y control de acceso</li>
-          <li>✅ <strong>Velocidad máxima</strong> - Sin proxy, directo a S3</li>
-          <li>✅ <strong>Archivos hasta 200MB</strong> - Sin restricciones del servidor</li>
-          <li>✅ <strong>Fallback automático</strong> - Método tradicional si falla</li>
-        </ul>
-        <div class="upload-flow" style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 5px;">
-          <strong>Flujo de Upload:</strong>
-          <br>
-          <small>
-            1️⃣ Solicitar URL presignada al servidor<br>
-            2️⃣ Upload directo a AWS S3<br>
-            3️⃣ Confirmar y guardar metadata
-          </small>
+      <!-- S3 Direct Upload Info -->
+      <div class="s3-info" style="margin-bottom: 20px; padding: 15px; background: linear-gradient(135deg, #e8f5e8 0%, #d4edda 100%); border-radius: 8px; border-left: 4px solid #28a745;">
+        <h4><i class="fab fa-aws"></i> Upload Directo a AWS S3 (2025)</h4>
+        <div class="info-grid">
+          <div class="info-column">
+            <h5>🚀 Ventajas del Upload Directo:</h5>
+            <ul>
+              <li>✅ <strong>Sin límites de Vercel</strong> - Archivos hasta 200MB</li>
+              <li>✅ <strong>Velocidad máxima</strong> - Directo a AWS sin proxy</li>
+              <li>✅ <strong>URLs presignadas</strong> - Seguridad enterprise</li>
+              <li>✅ <strong>Fallback automático</strong> - Método tradicional si falla</li>
+            </ul>
+          </div>
+          <div class="info-column">
+            <h5>🔄 Proceso de 3 Pasos:</h5>
+            <ol>
+              <li><strong>Solicitar URL presignada</strong> del servidor</li>
+              <li><strong>Upload directo</strong> a AWS S3</li>
+              <li><strong>Confirmar y guardar</strong> metadata</li>
+            </ol>
+          </div>
         </div>
       </div>
 
       <button type="submit" class="btn btn-primary" :disabled="!form.file || uploading">
         <span v-if="uploading" class="loading"></span>
         <i v-else class="fab fa-aws"></i>
-        {{ uploading ? 'Subiendo a AWS S3...' : 'Subir APK a AWS S3' }}
+        {{ getUploadButtonText() }}
       </button>
+      
+      <div v-if="uploading" class="upload-warning" style="margin-top: 10px; font-size: 0.9rem; color: #856404;">
+        <i class="fas fa-info-circle"></i>
+        No cierres esta ventana durante el upload. El proceso puede tardar varios minutos para archivos grandes.
+      </div>
     </form>
   </div>
 </template>
 
 <script>
-import { ref } from 'vue'
+import { ref, computed } from 'vue'
 import { formatFileSize } from '@/utils/formatters'
 import ApiService from '@/services/ApiService'
 
@@ -230,14 +236,26 @@ export default {
     }
 
     const validateFile = (file) => {
+      if (!file) {
+        alert('No se seleccionó archivo')
+        return false
+      }
+      
       if (file.size > 200 * 1024 * 1024) {
         alert('El archivo es demasiado grande. Máximo 200MB.')
         return false
       }
+      
       if (!file.name.endsWith('.apk')) {
         alert('Solo se permiten archivos APK.')
         return false
       }
+      
+      if (file.size === 0) {
+        alert('El archivo está vacío.')
+        return false
+      }
+      
       return true
     }
 
@@ -258,8 +276,15 @@ export default {
       }
     }
 
+    const removeFile = () => {
+      form.value.file = null
+      if (this.$refs.fileInput) {
+        this.$refs.fileInput.value = ''
+      }
+    }
+
     const calculateUploadStats = (progress) => {
-      if (!uploadStartTime.value) {
+      if (!uploadStartTime.value || progress <= 0) {
         uploadStartTime.value = Date.now()
         return
       }
@@ -267,20 +292,30 @@ export default {
       const elapsed = (Date.now() - uploadStartTime.value) / 1000
       const totalSize = form.value.file.size
       const uploadedSize = (totalSize * progress) / 100
-      const speed = uploadedSize / elapsed / 1024 / 1024 // MB/s
       
-      uploadSpeed.value = speed.toFixed(1)
-      
-      if (progress > 5 && progress < 100) {
-        const remainingSize = totalSize - uploadedSize
-        const eta = remainingSize / (uploadedSize / elapsed) / 1000 // segundos
+      if (elapsed > 1) { // Solo después de 1 segundo
+        const speed = uploadedSize / elapsed / 1024 / 1024 // MB/s
+        uploadSpeed.value = speed.toFixed(1)
         
-        if (eta < 60) {
-          estimatedTime.value = `${Math.round(eta)}s`
-        } else {
-          estimatedTime.value = `${Math.round(eta / 60)}m ${Math.round(eta % 60)}s`
+        if (progress > 10 && progress < 95) {
+          const remainingSize = totalSize - uploadedSize
+          const eta = remainingSize / (uploadedSize / elapsed) // segundos
+          
+          if (eta < 60) {
+            estimatedTime.value = `${Math.round(eta)}s`
+          } else if (eta < 3600) {
+            estimatedTime.value = `${Math.round(eta / 60)}m ${Math.round(eta % 60)}s`
+          } else {
+            estimatedTime.value = `${Math.round(eta / 3600)}h ${Math.round((eta % 3600) / 60)}m`
+          }
         }
       }
+    }
+
+    const resetUploadStats = () => {
+      uploadStartTime.value = null
+      uploadSpeed.value = null
+      estimatedTime.value = null
     }
 
     const handleSubmit = () => {
@@ -297,11 +332,9 @@ export default {
       }
 
       // Resetear estadísticas
-      uploadStartTime.value = null
-      uploadSpeed.value = null
-      estimatedTime.value = null
+      resetUploadStats()
 
-      console.log(`🚀 Iniciando upload de v${form.value.version} con configuración CORS permisiva`)
+      console.log(`🚀 Iniciando upload directo a S3 v${form.value.version}`)
 
       // Callback de progress con estadísticas
       const progressCallback = (progress) => {
@@ -310,14 +343,27 @@ export default {
 
       emit('upload-apk', { ...form.value }, progressCallback)
       
-      // Reset form
-      form.value = {
-        version: '',
-        releaseNotes: '',
-        minAndroidVersion: '5.0',
-        targetSdkVersion: 33,
-        file: null
+      // Reset form después de iniciar upload
+      setTimeout(() => {
+        form.value = {
+          version: '',
+          releaseNotes: '',
+          minAndroidVersion: '5.0',
+          targetSdkVersion: 33,
+          file: null
+        }
+        resetUploadStats()
+      }, 1000) // Resetear después de que el upload comience
+    }
+
+    const getUploadButtonText = () => {
+      if (props.uploading) {
+        if (props.uploadProgress < 5) return 'Obteniendo URL presignada...'
+        if (props.uploadProgress < 95) return `Subiendo a S3... ${props.uploadProgress}%`
+        if (props.uploadProgress < 100) return 'Confirmando...'
+        return 'Completando...'
       }
+      return 'Subir APK a AWS S3'
     }
 
     return {
@@ -331,7 +377,9 @@ export default {
       testApiConnection,
       handleFileSelect,
       handleFileDrop,
-      handleSubmit
+      removeFile,
+      handleSubmit,
+      getUploadButtonText
     }
   }
 }
@@ -361,6 +409,11 @@ export default {
   background: #f8d7da;
   color: #721c24;
   border: 1px solid #f5c6cb;
+}
+
+.file-upload.disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
 }
 
 .progress-container {
@@ -397,33 +450,67 @@ export default {
 .upload-features {
   margin-top: 10px;
   color: #4caf50;
+  font-size: 0.85rem;
 }
 
-.upload-complete {
-  background: #d4edda;
+.s3-info h4 {
+  margin-bottom: 15px;
   color: #155724;
-  padding: 15px;
-  border-radius: 8px;
-  border: 1px solid #c3e6cb;
+}
+
+.info-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+}
+
+.info-column h5 {
+  color: #0d4f8c;
+  margin-bottom: 8px;
+  font-size: 0.95rem;
+}
+
+.info-column ul, .info-column ol {
+  margin: 0;
+  padding-left: 18px;
+  font-size: 0.9rem;
+}
+
+.info-column li {
+  margin: 4px 0;
+  color: #495057;
+}
+
+.upload-steps {
   text-align: center;
+  font-weight: 500;
 }
 
-.upload-complete i {
-  font-size: 1.2rem;
-  margin-right: 8px;
+.success-message {
+  color: #28a745;
 }
 
-.api-info h4 {
-  margin-bottom: 10px;
-  color: #2e7d32;
+.upload-warning {
+  background: #fff3cd;
+  padding: 8px 12px;
+  border-radius: 4px;
+  border: 1px solid #ffeaa7;
 }
 
-.api-info ul {
-  list-style: none;
-}
-
-.api-info li {
-  margin: 5px 0;
-  color: #424242;
+@media (max-width: 768px) {
+  .info-grid {
+    grid-template-columns: 1fr;
+    gap: 15px;
+  }
+  
+  .progress-info {
+    flex-direction: column;
+    gap: 5px;
+    text-align: center;
+  }
+  
+  .upload-speed {
+    float: none;
+  }
 }
 </style>
