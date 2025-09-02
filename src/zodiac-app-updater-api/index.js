@@ -27,52 +27,14 @@ const s3Client = new S3Client({
 
 const S3_BUCKET = process.env.S3_BUCKET_NAME || 'zodiac-app-apks';
 
-// Configuración específica de CORS para Vercel
+// Configuración CORS súper permisiva - PERMITE TODO
 const corsOptions = {
-  origin: function (origin, callback) {
-    // Permitir requests sin origin (ej: aplicaciones móviles, Postman)
-    if (!origin) return callback(null, true);
-    
-    // Lista de orígenes permitidos
-    const allowedOrigins = [
-      'http://localhost:3000',
-      'http://localhost:5173',
-      'http://localhost:8080',
-      'https://zodiac-app-8iab.vercel.app', // Tu cliente
-      // Permitir todos los subdominios de vercel.app para desarrollo
-      /^https:\/\/.*\.vercel\.app$/,
-    ];
-    
-    // Verificar si el origin está permitido
-    const isAllowed = allowedOrigins.some(allowedOrigin => {
-      if (typeof allowedOrigin === 'string') {
-        return origin === allowedOrigin;
-      } else if (allowedOrigin instanceof RegExp) {
-        return allowedOrigin.test(origin);
-      }
-      return false;
-    });
-    
-    if (isAllowed) {
-      callback(null, true);
-    } else {
-      console.warn(`CORS blocked origin: ${origin}`);
-      callback(null, false);
-    }
-  },
-  credentials: true, // Permitir cookies si las necesitas
-  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'HEAD'],
-  allowedHeaders: [
-    'Origin',
-    'X-Requested-With', 
-    'Content-Type',
-    'Accept',
-    'Authorization',
-    'Cache-Control',
-    'X-File-Name'
-  ],
-  exposedHeaders: ['Content-Length', 'X-Foo', 'X-Bar'],
-  maxAge: 86400 // 24 hours
+  origin: '*', // Permitir TODOS los orígenes
+  credentials: false, // No usar credentials con origin: '*'
+  methods: '*', // Permitir TODOS los métodos
+  allowedHeaders: '*', // Permitir TODOS los headers
+  exposedHeaders: '*', // Exponer todos los headers
+  optionsSuccessStatus: 200
 };
 
 // Middleware de seguridad y optimización
@@ -91,14 +53,21 @@ const limiter = rateLimit({
 });
 app.use('/api/', limiter);
 
-// Middleware para manejar preflight requests de CORS
+// Middleware súper permisivo para preflight requests
 app.options('*', (req, res) => {
-  res.header('Access-Control-Allow-Origin', req.headers.origin);
-  res.header('Access-Control-Allow-Methods', 'GET,PUT,POST,DELETE,OPTIONS');
-  res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With, Accept, Origin');
-  res.header('Access-Control-Allow-Credentials', 'true');
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', '*');
+  res.header('Access-Control-Allow-Headers', '*');
   res.header('Access-Control-Max-Age', '86400');
   res.sendStatus(200);
+});
+
+// Middleware global para agregar headers CORS a todas las respuestas
+app.use((req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', '*');
+  res.header('Access-Control-Allow-Headers', '*');
+  next();
 });
 
 // Conexión a MongoDB
@@ -278,10 +247,10 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
 // 3. Subir nueva versión del APK con AWS S3 SDK v3
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
-    // Headers adicionales para CORS y archivos grandes
-    res.header('Access-Control-Allow-Origin', req.headers.origin);
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+    // Headers súper permisivos
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', '*');
+    res.header('Access-Control-Allow-Headers', '*');
     
     if (!req.file) {
       return res.status(400).json({

@@ -4,26 +4,27 @@ class ApiService {
   constructor(baseURL) {
     this.api = axios.create({
       baseURL: baseURL,
-      timeout: 300000, // 5 minutos para uploads grandes
-      withCredentials: false, // Cambiado a false para evitar problemas de CORS
+      timeout: 600000, // 10 minutos para uploads grandes (tu API permite todo)
+      withCredentials: false, // Compatible con tu origin: '*'
       headers: {
-        'Content-Type': 'application/json',
         'Accept': 'application/json'
+        // Removemos Content-Type por defecto para mayor flexibilidad
       }
     })
 
-    // Request interceptor
+    // Request interceptor simplificado
     this.api.interceptors.request.use(
       (config) => {
-        console.log(`Making ${config.method?.toUpperCase()} request to ${config.url}`)
+        console.log(`🌐 ${config.method?.toUpperCase()} ${config.url}`)
         
-        // Headers específicos para CORS
-        config.headers['X-Requested-With'] = 'XMLHttpRequest'
-        
-        // Para uploads de archivos, no establecer Content-Type (lo hará el navegador)
+        // Para FormData, el navegador establecerá Content-Type automáticamente
         if (config.data instanceof FormData) {
+          // No establecer Content-Type para que el navegador agregue boundary
           delete config.headers['Content-Type']
-          config.timeout = 600000 // 10 minutos para uploads
+          console.log('📤 FormData upload detected, removing Content-Type header')
+        } else if (!config.headers['Content-Type']) {
+          // Solo para requests JSON
+          config.headers['Content-Type'] = 'application/json'
         }
         
         return config
@@ -33,18 +34,17 @@ class ApiService {
       }
     )
 
-    // Response interceptor
+    // Response interceptor simplificado
     this.api.interceptors.response.use(
       (response) => {
+        console.log(`✅ ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`)
         return response.data
       },
       (error) => {
-        console.error('API Error:', error.response?.data || error.message)
-        
-        // Manejo específico de errores CORS
-        if (error.code === 'NETWORK_ERROR' || error.message.includes('CORS')) {
-          console.error('Error de CORS detectado. Verifica la configuración del servidor.')
-        }
+        const status = error.response?.status
+        const url = error.config?.url
+        console.error(`❌ ${status || 'NETWORK'} ${error.config?.method?.toUpperCase()} ${url}`)
+        console.error('Error details:', error.response?.data || error.message)
         
         return Promise.reject(error)
       }
@@ -53,7 +53,7 @@ class ApiService {
 
   // Health check
   async checkHealth() {
-    return await this.api.get('/api/health', { timeout: 10000 })
+    return await this.api.get('/api/health')
   }
 
   // Get all versions
@@ -76,7 +76,7 @@ class ApiService {
     return await this.api.delete(`/api/version/${version}`)
   }
 
-  // Upload APK with improved CORS handling
+  // Upload APK - Optimizado para tu CORS permisivo
   async uploadApk(uploadData, onUploadProgress) {
     const formData = new FormData()
     formData.append('apk', uploadData.file)
@@ -85,23 +85,17 @@ class ApiService {
     formData.append('minAndroidVersion', uploadData.minAndroidVersion || '5.0')
     formData.append('targetSdkVersion', uploadData.targetSdkVersion || '33')
 
-    // Configuración específica para upload con CORS
+    console.log(`🚀 Iniciando upload de APK v${uploadData.version} (${(uploadData.file.size / 1024 / 1024).toFixed(2)}MB)`)
+
     const config = {
-      headers: {
-        // No establecer Content-Type, el navegador lo hará automáticamente con boundary
-        'Accept': 'application/json',
-        'X-Requested-With': 'XMLHttpRequest',
-        'X-File-Name': uploadData.file.name
-      },
-      timeout: 600000, // 10 minutos para archivos grandes
+      timeout: 600000, // 10 minutos
       onUploadProgress: (progressEvent) => {
         if (progressEvent.lengthComputable) {
           const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          console.log(`Upload progress: ${progress}%`)
           onUploadProgress?.(progress)
         }
       },
-      // Configuración adicional para archivos grandes
+      // Sin restricciones de content length ya que tu API permite todo
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     }
@@ -124,16 +118,23 @@ class ApiService {
     return `${this.api.defaults.baseURL}/api/download/${version}`
   }
 
-  // Test CORS connectivity
-  async testCors() {
+  // Test de conectividad simple (ya no necesitamos test CORS específico)
+  async testConnection() {
     try {
-      const response = await this.api.options('/api/health')
-      return { success: true, data: response }
+      console.log('🧪 Testing API connectivity...')
+      const response = await this.api.get('/api/health')
+      console.log('✅ API connection successful')
+      return { 
+        success: true, 
+        data: response,
+        message: 'Conexión API exitosa'
+      }
     } catch (error) {
+      console.error('❌ API connection failed:', error.message)
       return { 
         success: false, 
         error: error.message,
-        isCorsError: error.code === 'NETWORK_ERROR' || error.message.includes('CORS')
+        message: 'Error de conectividad con la API'
       }
     }
   }

@@ -2,20 +2,25 @@
   <div class="content-card">
     <h2><i class="fas fa-upload"></i> Subir Nueva Versión</h2>
     
-    <!-- CORS Test Section -->
-    <div class="cors-test-section" style="margin-bottom: 30px;">
-      <button @click="testCorsConnection" class="btn btn-primary" :disabled="testingCors">
-        <i v-if="testingCors" class="fas fa-spinner fa-spin"></i>
-        <i v-else class="fas fa-network-wired"></i>
-        {{ testingCors ? 'Verificando...' : 'Verificar Conexión CORS' }}
+    <!-- Connection Test Section - Simplificado -->
+    <div class="connection-test-section" style="margin-bottom: 30px;">
+      <button @click="testApiConnection" class="btn btn-primary" :disabled="testingConnection">
+        <i v-if="testingConnection" class="fas fa-spinner fa-spin"></i>
+        <i v-else class="fas fa-heartbeat"></i>
+        {{ testingConnection ? 'Verificando...' : 'Verificar Conexión API' }}
       </button>
       
-      <div v-if="corsTestResult" class="cors-result" :class="corsTestResult.success ? 'cors-success' : 'cors-error'">
+      <div v-if="connectionTestResult" class="connection-result" :class="connectionTestResult.success ? 'connection-success' : 'connection-error'">
         <p>
-          <strong>{{ corsTestResult.success ? '✅ CORS OK' : '❌ Error CORS' }}</strong>
+          <strong>{{ connectionTestResult.success ? '✅ API Conectada' : '❌ Error de Conexión' }}</strong>
         </p>
-        <p v-if="!corsTestResult.success && corsTestResult.isCorsError">
-          La conexión CORS falló. Verifica que la API esté funcionando y configurada correctamente.
+        <p>{{ connectionTestResult.message }}</p>
+        <p v-if="connectionTestResult.success && connectionTestResult.data">
+          <small>
+            <i class="fab fa-aws"></i> {{ connectionTestResult.data.storage }} 
+            | Límite: {{ connectionTestResult.data.maxUpload }}
+            | Bucket: {{ connectionTestResult.data.bucket }}
+          </small>
         </p>
       </div>
     </div>
@@ -80,14 +85,19 @@
           <div v-if="!form.file">
             <i class="fas fa-cloud-upload-alt" style="font-size: 3rem; color: #667eea; margin-bottom: 10px;"></i>
             <p><strong>Haz clic aquí</strong> o arrastra el archivo APK</p>
-            <p style="color: #666; font-size: 0.9rem;">Máximo 200MB - Almacenamiento en AWS S3</p>
+            <p style="color: #666; font-size: 0.9rem;">Máximo 200MB - Almacenamiento directo en AWS S3</p>
+            <div class="upload-features">
+              <small><i class="fas fa-check"></i> Sin restricciones CORS</small> |
+              <small><i class="fas fa-check"></i> Upload directo</small> |
+              <small><i class="fab fa-aws"></i> S3 SDK v3</small>
+            </div>
           </div>
           <div v-else>
             <i class="fab fa-android" style="font-size: 2rem; color: #27ae60; margin-bottom: 10px;"></i>
             <p><strong>{{ form.file.name }}</strong></p>
-            <p style="color: #666; font-size: 0.9rem;">{{ formatFileSize(form.file.size) }}</p>
-            <div class="file-info">
-              <small><i class="fab fa-aws"></i> Se subirá a AWS S3</small>
+            <div class="file-details">
+              <p><i class="fas fa-weight-hanging"></i> {{ formatFileSize(form.file.size) }}</p>
+              <p><i class="fab fa-aws"></i> Listo para subir a S3</p>
             </div>
             <button type="button" @click.stop="form.file = null" class="btn btn-danger" style="margin-top: 10px;">
               <i class="fas fa-times"></i> Remover
@@ -103,25 +113,38 @@
         >
       </div>
 
+      <!-- Progress Section Mejorada -->
       <div v-if="uploadProgress > 0 && uploadProgress < 100" class="form-group">
-        <label>Progreso de subida a AWS S3</label>
-        <div class="progress-bar">
-          <div class="progress-fill" :style="{ width: uploadProgress + '%' }"></div>
-        </div>
-        <div class="progress-info">
-          <span>{{ uploadProgress }}%</span>
-          <span v-if="uploadSpeed">{{ uploadSpeed }} MB/s</span>
-          <span v-if="estimatedTime">ETA: {{ estimatedTime }}</span>
+        <label>
+          <i class="fab fa-aws"></i> Subiendo a AWS S3
+          <span v-if="uploadSpeed" class="upload-speed">{{ uploadSpeed }} MB/s</span>
+        </label>
+        <div class="progress-container">
+          <div class="progress-bar">
+            <div class="progress-fill" :style="{ width: uploadProgress + '%' }"></div>
+          </div>
+          <div class="progress-info">
+            <span class="progress-percent">{{ uploadProgress }}%</span>
+            <span v-if="estimatedTime" class="progress-eta">ETA: {{ estimatedTime }}</span>
+          </div>
         </div>
       </div>
 
-      <div class="upload-info" style="margin-bottom: 20px; padding: 15px; background: #e3f2fd; border-radius: 8px; border-left: 4px solid #2196f3;">
-        <h4><i class="fab fa-aws"></i> Información de AWS S3</h4>
+      <!-- Success Message -->
+      <div v-if="uploadProgress === 100" class="upload-complete" style="margin-bottom: 20px;">
+        <i class="fas fa-check-circle"></i>
+        <strong>Upload completado exitosamente a AWS S3!</strong>
+      </div>
+
+      <!-- API Info Section -->
+      <div class="api-info" style="margin-bottom: 20px; padding: 15px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #4caf50;">
+        <h4><i class="fas fa-rocket"></i> Configuración Optimizada</h4>
         <ul style="margin: 10px 0; padding-left: 20px;">
+          <li>✅ CORS completamente permisivo configurado</li>
+          <li>✅ Upload directo sin restricciones</li>
+          <li>✅ Límite de 200MB por archivo</li>
           <li>✅ Almacenamiento seguro en AWS S3</li>
-          <li>✅ CDN global para descargas rápidas</li>
-          <li>✅ Límite: 200MB por archivo</li>
-          <li>✅ Backup automático y alta disponibilidad</li>
+          <li>✅ Timeout de 10 minutos para archivos grandes</li>
         </ul>
       </div>
 
@@ -154,8 +177,8 @@ export default {
   emits: ['upload-apk'],
   setup(props, { emit }) {
     const dragOver = ref(false)
-    const testingCors = ref(false)
-    const corsTestResult = ref(null)
+    const testingConnection = ref(false)
+    const connectionTestResult = ref(null)
     const uploadSpeed = ref(null)
     const estimatedTime = ref(null)
     const uploadStartTime = ref(null)
@@ -172,22 +195,22 @@ export default {
     const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000'
     const apiService = new ApiService(apiUrl)
 
-    const testCorsConnection = async () => {
-      testingCors.value = true
-      corsTestResult.value = null
+    const testApiConnection = async () => {
+      testingConnection.value = true
+      connectionTestResult.value = null
       
       try {
-        const result = await apiService.testCors()
-        corsTestResult.value = result
+        const result = await apiService.testConnection()
+        connectionTestResult.value = result
       } catch (error) {
-        corsTestResult.value = {
+        connectionTestResult.value = {
           success: false,
           error: error.message,
-          isCorsError: true
+          message: 'Error de conectividad con la API'
         }
       }
       
-      testingCors.value = false
+      testingConnection.value = false
     }
 
     const validateFile = (file) => {
@@ -206,10 +229,7 @@ export default {
       const file = event.target.files[0]
       if (file && validateFile(file)) {
         form.value.file = file
-        
-        // Calcular estadísticas del archivo
-        const sizeMB = file.size / 1024 / 1024
-        console.log(`📱 APK seleccionado: ${file.name} (${sizeMB.toFixed(2)} MB)`)
+        console.log(`📱 APK seleccionado: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`)
       }
     }
 
@@ -218,6 +238,7 @@ export default {
       const file = event.dataTransfer.files[0]
       if (file && validateFile(file)) {
         form.value.file = file
+        console.log(`📱 APK arrastrado: ${file.name} (${(file.size / 1024 / 1024).toFixed(2)} MB)`)
       }
     }
 
@@ -234,7 +255,7 @@ export default {
       
       uploadSpeed.value = speed.toFixed(1)
       
-      if (progress > 5) { // Solo calcular ETA después del 5%
+      if (progress > 5 && progress < 100) {
         const remainingSize = totalSize - uploadedSize
         const eta = remainingSize / (uploadedSize / elapsed) / 1000 // segundos
         
@@ -259,19 +280,21 @@ export default {
         return
       }
 
-      // Resetear estadísticas de upload
+      // Resetear estadísticas
       uploadStartTime.value = null
       uploadSpeed.value = null
       estimatedTime.value = null
 
-      // Crear callback para progress con estadísticas
+      console.log(`🚀 Iniciando upload de v${form.value.version} con configuración CORS permisiva`)
+
+      // Callback de progress con estadísticas
       const progressCallback = (progress) => {
         calculateUploadStats(progress)
       }
 
       emit('upload-apk', { ...form.value }, progressCallback)
       
-      // Reset form after successful upload
+      // Reset form
       form.value = {
         version: '',
         releaseNotes: '',
@@ -284,12 +307,12 @@ export default {
     return {
       dragOver,
       form,
-      testingCors,
-      corsTestResult,
+      testingConnection,
+      connectionTestResult,
       uploadSpeed,
       estimatedTime,
       formatFileSize,
-      testCorsConnection,
+      testApiConnection,
       handleFileSelect,
       handleFileDrop,
       handleSubmit
@@ -299,55 +322,91 @@ export default {
 </script>
 
 <style scoped>
-.cors-test-section {
+.connection-test-section {
   border: 1px solid #ddd;
   padding: 15px;
   border-radius: 8px;
-  background: #f9f9f9;
+  background: linear-gradient(135deg, #f0f8ff 0%, #e6f3ff 100%);
 }
 
-.cors-result {
+.connection-result {
   margin-top: 10px;
   padding: 10px;
   border-radius: 5px;
 }
 
-.cors-success {
+.connection-success {
   background: #d4edda;
   color: #155724;
   border: 1px solid #c3e6cb;
 }
 
-.cors-error {
+.connection-error {
   background: #f8d7da;
   color: #721c24;
   border: 1px solid #f5c6cb;
 }
 
+.progress-container {
+  margin-top: 5px;
+}
+
 .progress-info {
   display: flex;
   justify-content: space-between;
-  margin-top: 5px;
+  margin-top: 8px;
   font-size: 0.9rem;
+}
+
+.progress-percent {
+  font-weight: bold;
+  color: #667eea;
+}
+
+.progress-eta {
   color: #666;
 }
 
-.file-info {
-  margin-top: 5px;
-  font-size: 0.8rem;
+.upload-speed {
+  float: right;
+  color: #27ae60;
+  font-weight: bold;
+}
+
+.file-details p {
+  margin: 5px 0;
   color: #666;
 }
 
-.upload-info h4 {
+.upload-features {
+  margin-top: 10px;
+  color: #4caf50;
+}
+
+.upload-complete {
+  background: #d4edda;
+  color: #155724;
+  padding: 15px;
+  border-radius: 8px;
+  border: 1px solid #c3e6cb;
+  text-align: center;
+}
+
+.upload-complete i {
+  font-size: 1.2rem;
+  margin-right: 8px;
+}
+
+.api-info h4 {
   margin-bottom: 10px;
-  color: #1976d2;
+  color: #2e7d32;
 }
 
-.upload-info ul {
+.api-info ul {
   list-style: none;
 }
 
-.upload-info li {
+.api-info li {
   margin: 5px 0;
   color: #424242;
 }
