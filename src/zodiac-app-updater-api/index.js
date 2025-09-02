@@ -9,17 +9,23 @@ const semver = require('semver');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
-const cloudinary = require('cloudinary').v2;
+
+// AWS SDK v3 - Importaciones modulares
+const { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// Configurar Cloudinary
-cloudinary.config({
-  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
-  api_key: process.env.CLOUDINARY_API_KEY,
-  api_secret: process.env.CLOUDINARY_API_SECRET
+// Configurar AWS S3 Client (v3)
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'us-east-1',
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+  },
 });
+
+const S3_BUCKET = process.env.S3_BUCKET_NAME || 'zodiac-app-apks';
 
 // Middleware de seguridad y optimización
 app.use(helmet());
@@ -66,7 +72,11 @@ const AppVersionSchema = new mongoose.Schema({
     type: String,
     required: true
   },
-  cloudinaryPublicId: {
+  s3Key: {
+    type: String,
+    required: true
+  },
+  s3Bucket: {
     type: String,
     required: true
   },
@@ -100,7 +110,7 @@ const AppVersion = mongoose.model('AppVersion', AppVersionSchema);
 const upload = multer({ 
   storage: multer.memoryStorage(),
   limits: {
-    fileSize: 100 * 1024 * 1024 // 100MB límite
+    fileSize: 200 * 1024 * 1024 // 200MB límite - suficiente para tus APKs grandes
   },
   fileFilter: (req, file, cb) => {
     if (file.mimetype === 'application/vnd.android.package-archive' || 
@@ -111,6 +121,12 @@ const upload = multer({
     }
   }
 });
+
+// Función helper para generar URL pública de S3
+const generateS3Url = (bucket, key) => {
+  const region = process.env.AWS_REGION || 'us-east-1';
+  return `https://${bucket}.s3.${region}.amazonaws.com/${key}`;
+};
 
 // ENDPOINTS DE LA API
 
@@ -135,6 +151,7 @@ app.get('/api/version/latest', async (req, res) => {
         version: latestVersion.version,
         releaseNotes: latestVersion.releaseNotes,
         fileSize: latestVersion.fileSize,
+        fileSizeMB: (latestVersion.fileSize / 1024 / 1024).toFixed(2),
         uploadDate: latestVersion.uploadDate,
         minAndroidVersion: latestVersion.minAndroidVersion,
         targetSdkVersion: latestVersion.targetSdkVersion,
@@ -185,7 +202,8 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
       latestVersion: latestVersion.version,
       releaseNotes: hasUpdate ? latestVersion.releaseNotes : null,
       downloadUrl: hasUpdate ? `/api/download/${latestVersion.version}` : null,
-      fileSize: hasUpdate ? latestVersion.fileSize : null
+      fileSize: hasUpdate ? latestVersion.fileSize : null,
+      fileSizeMB: hasUpdate ? (latestVersion.fileSize / 1024 / 1024).toFixed(2) : null
     });
   } catch (error) {
     console.error('Error comparando versión:', error);
@@ -197,7 +215,7 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3. Subir nueva versión del APK con Cloudinary
+// 3. Subir nueva versión del APK con AWS S3 SDK v3
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
     if (!req.file) {
@@ -225,30 +243,42 @@ app.post('/api/upload', upload.single('apk'), async (req, res) => {
       });
     }
 
-    console.log(`📤 Subiendo APK v${version} a Cloudinary...`);
+    const fileSizeMB = (req.file.size / 1024 / 1024).toFixed(2);
+    console.log(`📤 Subiendo APK v${version} a S3... (Tamaño: ${fileSizeMB}MB)`);
 
-    // Convertir buffer a base64 para Cloudinary
-    const base64File = `data:application/vnd.android.package-archive;base64,${req.file.buffer.toString('base64')}`;
+    const s3Key = `apks/${version}/zodiac-app-v${version}.apk`;
     
-    const publicId = `zodiac-app/apks/zodiac-app-v${version}`;
-    
-    // Subir a Cloudinary
-    const uploadResult = await cloudinary.uploader.upload(base64File, {
-      resource_type: 'raw', // Para archivos que no son imágenes/videos
-      public_id: publicId,
-      access_mode: 'public',
-      use_filename: true,
-      unique_filename: false
+    // Comando para subir archivo a S3 (SDK v3) - SIN ACL
+    const putObjectCommand = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: s3Key,
+      Body: req.file.buffer,
+      ContentType: 'application/vnd.android.package-archive',
+      ContentDisposition: `attachment; filename="zodiac-app-v${version}.apk"`,
+      // ACL removido - usamos política del bucket en su lugar
+      Metadata: {
+        'version': version,
+        'upload-date': new Date().toISOString(),
+        'file-size': req.file.size.toString(),
+        'original-name': req.file.originalname
+      }
     });
 
-    console.log(`✅ APK subido exitosamente a Cloudinary: ${uploadResult.secure_url}`);
+    // Ejecutar comando de subida
+    await s3Client.send(putObjectCommand);
+
+    // Generar URL pública
+    const s3Url = generateS3Url(S3_BUCKET, s3Key);
+
+    console.log(`✅ APK subido exitosamente a S3: ${s3Url}`);
 
     const newVersion = new AppVersion({
       version,
       releaseNotes: releaseNotes || '',
       apkFileName: `zodiac-app-v${version}.apk`,
-      apkPath: uploadResult.secure_url,
-      cloudinaryPublicId: uploadResult.public_id,
+      apkPath: s3Url,
+      s3Key: s3Key,
+      s3Bucket: S3_BUCKET,
       fileSize: req.file.size,
       minAndroidVersion: minAndroidVersion || '5.0',
       targetSdkVersion: parseInt(targetSdkVersion) || 33
@@ -258,13 +288,15 @@ app.post('/api/upload', upload.single('apk'), async (req, res) => {
 
     res.status(201).json({
       success: true,
-      message: 'Versión subida exitosamente',
+      message: 'Versión subida exitosamente a AWS S3',
       data: {
         version: newVersion.version,
         fileSize: newVersion.fileSize,
+        fileSizeMB: fileSizeMB,
         uploadDate: newVersion.uploadDate,
         downloadUrl: `/api/download/${version}`,
-        cloudinaryUrl: uploadResult.secure_url
+        s3Url: s3Url,
+        s3Key: s3Key
       }
     });
   } catch (error) {
@@ -291,10 +323,24 @@ app.get('/api/download/:version', async (req, res) => {
       });
     }
 
-    console.log(`📥 Descargando APK v${version} desde Cloudinary`);
+    console.log(`📥 Descargando APK v${version} desde S3`);
 
-    // Configurar headers para descarga y redirigir a Cloudinary
-    res.setHeader('Content-Disposition', `attachment; filename="${appVersion.apkFileName}"`);
+    // Verificar que el archivo existe en S3 usando SDK v3
+    try {
+      const headObjectCommand = new HeadObjectCommand({
+        Bucket: appVersion.s3Bucket,
+        Key: appVersion.s3Key
+      });
+      await s3Client.send(headObjectCommand);
+    } catch (error) {
+      console.error('Archivo no encontrado en S3:', error.message);
+      return res.status(404).json({
+        success: false,
+        message: 'Archivo no encontrado en S3'
+      });
+    }
+
+    // Redirigir a la URL directa de S3
     res.redirect(appVersion.apkPath);
   } catch (error) {
     console.error('Error descargando APK:', error);
@@ -312,16 +358,18 @@ app.get('/api/versions', async (req, res) => {
     const versions = await AppVersion
       .find({ isActive: true })
       .sort({ version: -1, uploadDate: -1 })
-      .select('-apkPath -cloudinaryPublicId')
+      .select('-apkPath -s3Key -s3Bucket')
       .exec();
 
     res.json({
       success: true,
       count: versions.length,
+      totalSizeMB: versions.reduce((sum, v) => sum + (v.fileSize / 1024 / 1024), 0).toFixed(2),
       data: versions.map(v => ({
         version: v.version,
         releaseNotes: v.releaseNotes,
         fileSize: v.fileSize,
+        fileSizeMB: (v.fileSize / 1024 / 1024).toFixed(2),
         uploadDate: v.uploadDate,
         minAndroidVersion: v.minAndroidVersion,
         targetSdkVersion: v.targetSdkVersion,
@@ -338,7 +386,7 @@ app.get('/api/versions', async (req, res) => {
   }
 });
 
-// 6. Eliminar versión (soft delete + eliminar de Cloudinary)
+// 6. Eliminar versión (soft delete + eliminar de S3)
 app.delete('/api/version/:version', async (req, res) => {
   try {
     const { version } = req.params;
@@ -351,15 +399,17 @@ app.delete('/api/version/:version', async (req, res) => {
       });
     }
 
-    // Eliminar de Cloudinary
+    // Eliminar de S3 usando SDK v3
     try {
-      await cloudinary.uploader.destroy(appVersion.cloudinaryPublicId, {
-        resource_type: 'raw'
+      const deleteObjectCommand = new DeleteObjectCommand({
+        Bucket: appVersion.s3Bucket,
+        Key: appVersion.s3Key
       });
-      console.log(`🗑️ APK v${version} eliminado de Cloudinary`);
-    } catch (cloudinaryError) {
-      console.warn('Error eliminando de Cloudinary:', cloudinaryError.message);
-      // Continuar aunque falle la eliminación de Cloudinary
+      await s3Client.send(deleteObjectCommand);
+      console.log(`🗑️ APK v${version} eliminado de S3`);
+    } catch (s3Error) {
+      console.warn('Error eliminando de S3:', s3Error.message);
+      // Continuar aunque falle la eliminación de S3
     }
 
     // Soft delete en la base de datos
@@ -380,37 +430,84 @@ app.delete('/api/version/:version', async (req, res) => {
   }
 });
 
-// 7. Endpoint para verificar configuración de Cloudinary
-app.get('/api/cloudinary/status', async (req, res) => {
+// 7. Endpoint para verificar configuración de S3
+app.get('/api/s3/status', async (req, res) => {
   try {
-    // Verificar configuración
-    const config = cloudinary.config();
-    
-    if (!config.cloud_name || !config.api_key || !config.api_secret) {
+    // Verificar configuración básica
+    if (!process.env.AWS_ACCESS_KEY_ID || !process.env.AWS_SECRET_ACCESS_KEY) {
       return res.status(500).json({
         success: false,
-        message: 'Configuración de Cloudinary incompleta',
-        config: {
-          cloud_name: !!config.cloud_name,
-          api_key: !!config.api_key,
-          api_secret: !!config.api_secret
+        message: 'Configuración de AWS S3 incompleta',
+        missing: {
+          accessKeyId: !process.env.AWS_ACCESS_KEY_ID,
+          secretAccessKey: !process.env.AWS_SECRET_ACCESS_KEY,
+          region: !process.env.AWS_REGION,
+          bucket: !process.env.S3_BUCKET_NAME
         }
       });
     }
 
-    // Hacer una prueba simple a la API
-    const result = await cloudinary.api.ping();
+    // Verificar que el bucket existe usando SDK v3
+    const headBucketCommand = new HeadBucketCommand({ Bucket: S3_BUCKET });
+    await s3Client.send(headBucketCommand);
     
     res.json({
       success: true,
-      message: 'Cloudinary configurado correctamente',
-      cloudName: config.cloud_name,
-      status: result.status
+      message: 'AWS S3 configurado correctamente',
+      config: {
+        bucket: S3_BUCKET,
+        region: process.env.AWS_REGION || 'us-east-1',
+        sdkVersion: 'v3 (Moderna)',
+        maxFileSize: '200MB'
+      }
     });
   } catch (error) {
+    console.error('Error verificando S3:', error);
     res.status(500).json({
       success: false,
-      message: 'Error conectando con Cloudinary',
+      message: 'Error conectando con AWS S3',
+      error: error.message,
+      bucket: S3_BUCKET,
+      suggestion: error.code === 'NoSuchBucket' ? 
+        'El bucket no existe. Créalo en AWS Console.' : 
+        'Verifica las credenciales y permisos.'
+    });
+  }
+});
+
+// 8. Endpoint para obtener estadísticas de uso
+app.get('/api/stats', async (req, res) => {
+  try {
+    const versions = await AppVersion.find({ isActive: true });
+    
+    const totalFiles = versions.length;
+    const totalSize = versions.reduce((sum, v) => sum + v.fileSize, 0);
+    const averageSize = totalFiles > 0 ? totalSize / totalFiles : 0;
+    
+    // Límites del plan gratuito de AWS
+    const FREE_TIER_LIMIT = 5 * 1024 * 1024 * 1024; // 5GB
+    const usagePercentage = (totalSize / FREE_TIER_LIMIT * 100).toFixed(2);
+
+    res.json({
+      success: true,
+      stats: {
+        totalVersions: totalFiles,
+        totalSizeBytes: totalSize,
+        totalSizeMB: (totalSize / 1024 / 1024).toFixed(2),
+        totalSizeGB: (totalSize / 1024 / 1024 / 1024).toFixed(3),
+        averageSizeMB: (averageSize / 1024 / 1024).toFixed(2),
+        freeTeir: {
+          limitGB: '5.0',
+          usedPercentage: Math.min(parseFloat(usagePercentage), 100),
+          remainingGB: Math.max(5 - (totalSize / 1024 / 1024 / 1024), 0).toFixed(3)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error obteniendo estadísticas:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error del servidor',
       error: error.message
     });
   }
@@ -422,7 +519,10 @@ app.get('/api/health', (req, res) => {
     success: true,
     message: 'API funcionando correctamente',
     timestamp: new Date().toISOString(),
-    cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
+    storage: 'AWS S3',
+    sdkVersion: 'v3',
+    bucket: S3_BUCKET,
+    maxUpload: '200MB'
   });
 });
 
@@ -448,7 +548,9 @@ app.use('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
   console.log(`📱 API de Zodiac App Updater lista!`);
-  console.log(`☁️ Cloudinary configurado: ${!!process.env.CLOUDINARY_CLOUD_NAME}`);
+  console.log(`☁️ AWS S3 SDK v3 configurado: ${!!process.env.AWS_ACCESS_KEY_ID}`);
+  console.log(`🪣 Bucket S3: ${S3_BUCKET}`);
+  console.log(`📦 Límite de archivo: 200MB`);
 });
 
 module.exports = app;
