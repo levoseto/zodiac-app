@@ -141,21 +141,34 @@ export default {
       }
     }
 
-    const uploadApk = async (uploadData) => {
+    const uploadApk = async (uploadData, progressCallback) => {
       uploading.value = true
       uploadProgress.value = 0
 
       try {
         await apiService.uploadApk(uploadData, (progress) => {
           uploadProgress.value = progress
+          progressCallback?.(progress)
         })
 
-        showMessage('APK subido exitosamente', 'success')
+        showMessage('APK subido exitosamente a AWS S3', 'success')
         await loadVersions()
         await loadLatestVersion()
         currentTab.value = 'versions'
       } catch (error) {
-        showMessage('Error al subir el APK: ' + (error.response?.data?.message || error.message), 'error')
+        console.error('Upload error:', error)
+        
+        // Manejo específico de errores CORS
+        if (error.code === 'NETWORK_ERROR' || error.message.includes('CORS')) {
+          showMessage('Error de CORS: Verifica que la API esté configurada correctamente. Intenta refrescar la página.', 'error')
+        } else if (error.response?.status === 413) {
+          showMessage('Error: Archivo demasiado grande. El límite es 200MB.', 'error')
+        } else if (error.response?.status === 409) {
+          showMessage('Error: Ya existe una versión con ese número.', 'error')
+        } else {
+          const errorMessage = error.response?.data?.message || error.message || 'Error desconocido'
+          showMessage('Error al subir el APK: ' + errorMessage, 'error')
+        }
       }
 
       uploading.value = false

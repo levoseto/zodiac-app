@@ -15,6 +15,22 @@
         <div class="stat-number">{{ formatFileSize(totalSize) }}</div>
         <div class="stat-label">Tamaño Total</div>
       </div>
+      <div class="stat-card" v-if="s3Stats">
+        <div class="stat-number">{{ s3Stats.usedPercentage }}%</div>
+        <div class="stat-label">AWS Free Tier Usado</div>
+      </div>
+    </div>
+
+    <!-- S3 Status -->
+    <div v-if="s3Status" class="s3-status-card" :class="s3Status.success ? 'status-success' : 'status-error'">
+      <h3><i class="fab fa-aws"></i> AWS S3 Status</h3>
+      <div class="status-info">
+        <p><strong>Estado:</strong> {{ s3Status.success ? '✅ Conectado' : '❌ Error' }}</p>
+        <p v-if="s3Status.success"><strong>Bucket:</strong> {{ s3Status.config?.bucket }}</p>
+        <p v-if="s3Status.success"><strong>Región:</strong> {{ s3Status.config?.region }}</p>
+        <p v-if="s3Status.success"><strong>Límite:</strong> {{ s3Status.config?.maxFileSize }}</p>
+        <p v-if="!s3Status.success" class="error-text">{{ s3Status.message }}</p>
+      </div>
     </div>
 
     <div v-if="latestVersion">
@@ -26,7 +42,8 @@
             <div class="version-meta">
               <i class="fas fa-calendar"></i> {{ formatDate(latestVersion.uploadDate) }} |
               <i class="fas fa-file-archive"></i> {{ formatFileSize(latestVersion.fileSize) }} |
-              <i class="fas fa-android"></i> Android {{ latestVersion.minAndroidVersion }}+
+              <i class="fas fa-android"></i> Android {{ latestVersion.minAndroidVersion }}+ |
+              <i class="fab fa-aws"></i> AWS S3
             </div>
           </div>
           <div class="version-actions">
@@ -47,7 +64,9 @@
 </template>
 
 <script>
+import { ref, onMounted } from 'vue'
 import { formatDate, formatFileSize } from '@/utils/formatters'
+import ApiService from '@/services/ApiService'
 
 export default {
   name: 'DashboardTab',
@@ -69,11 +88,74 @@ export default {
       required: true
     }
   },
-  setup() {
+  setup(props) {
+    const s3Status = ref(null)
+    const s3Stats = ref(null)
+    const apiService = new ApiService(props.apiUrl)
+
+    const loadS3Status = async () => {
+      try {
+        const response = await apiService.getS3Status()
+        s3Status.value = response
+      } catch (error) {
+        s3Status.value = { 
+          success: false, 
+          message: 'Error conectando con AWS S3: ' + error.message 
+        }
+      }
+    }
+
+    const loadS3Stats = async () => {
+      try {
+        const response = await apiService.getStats()
+        if (response.success) {
+          s3Stats.value = response.stats.freeTeir
+        }
+      } catch (error) {
+        console.error('Error loading S3 stats:', error)
+      }
+    }
+
+    onMounted(() => {
+      loadS3Status()
+      loadS3Stats()
+    })
+
     return {
       formatDate,
-      formatFileSize
+      formatFileSize,
+      s3Status,
+      s3Stats
     }
   }
 }
 </script>
+
+<style scoped>
+.s3-status-card {
+  margin: 20px 0;
+  padding: 20px;
+  border-radius: 10px;
+  border: 2px solid;
+}
+
+.status-success {
+  background: #d4edda;
+  border-color: #c3e6cb;
+  color: #155724;
+}
+
+.status-error {
+  background: #f8d7da;
+  border-color: #f5c6cb;
+  color: #721c24;
+}
+
+.status-info p {
+  margin: 5px 0;
+}
+
+.error-text {
+  font-weight: bold;
+}
+</style>
