@@ -84,25 +84,9 @@ const AppVersionSchema = new mongoose.Schema({
 
 const AppVersion = mongoose.model('AppVersion', AppVersionSchema);
 
-// Configuración de Multer para subida de archivos
-const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    const version = req.body.version;
-    const uploadPath = path.join(__dirname, 'uploads', 'apks', version);
-    
-    // Crear directorio si no existe
-    fs.mkdirSync(uploadPath, { recursive: true });
-    cb(null, uploadPath);
-  },
-  filename: function (req, file, cb) {
-    const version = req.body.version;
-    const fileName = `zodiac-app-v${version}.apk`;
-    cb(null, fileName);
-  }
-});
-
+// SOLUCIÓN: Usar memoryStorage en lugar de diskStorage
 const upload = multer({ 
-  storage: storage,
+  storage: multer.memoryStorage(), // Almacenar en memoria primero
   limits: {
     fileSize: 100 * 1024 * 1024 // 100MB límite
   },
@@ -204,7 +188,7 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3. Subir nueva versión del APK
+// 3. ENDPOINT CORREGIDO: Subir nueva versión del APK
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
     if (!req.file) {
@@ -232,12 +216,23 @@ app.post('/api/upload', upload.single('apk'), async (req, res) => {
       });
     }
 
+    // NUEVO: Ahora creamos el directorio y archivo manualmente
+    const uploadDir = path.join(__dirname, 'uploads', 'apks', version);
+    const fileName = `zodiac-app-v${version}.apk`;
+    const filePath = path.join(uploadDir, fileName);
+
+    // Crear directorio si no existe
+    fs.mkdirSync(uploadDir, { recursive: true });
+
+    // Escribir el archivo desde el buffer de memoria
+    fs.writeFileSync(filePath, req.file.buffer);
+
     const newVersion = new AppVersion({
       version,
       releaseNotes: releaseNotes || '',
-      apkFileName: req.file.filename,
-      apkPath: req.file.path,
-      fileSize: req.file.size,
+      apkFileName: fileName,
+      apkPath: filePath,
+      fileSize: req.file.size, // Tamaño desde req.file
       minAndroidVersion: minAndroidVersion || '5.0',
       targetSdkVersion: parseInt(targetSdkVersion) || 33
     });
