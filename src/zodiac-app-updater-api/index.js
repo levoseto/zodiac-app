@@ -245,7 +245,7 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3A. Generar URL firmada para upload directo a S3 (NUEVO)
+// 3A. Generar URL firmada para upload directo a S3 (CORREGIDO)
 app.post('/api/upload/presigned', async (req, res) => {
   try {
     // Headers CORS
@@ -254,6 +254,8 @@ app.post('/api/upload/presigned', async (req, res) => {
     res.header('Access-Control-Allow-Headers', '*');
     
     const { version, fileSize, fileName } = req.body;
+
+    console.log('📋 Request presigned URL:', { version, fileSize, fileName });
 
     if (!version || !semver.valid(version)) {
       return res.status(400).json({
@@ -279,20 +281,24 @@ app.post('/api/upload/presigned', async (req, res) => {
       Key: s3Key,
       ContentType: 'application/vnd.android.package-archive',
       ContentDisposition: `attachment; filename="zodiac-app-v${version}.apk"`,
+      // NO incluir Body aquí para URL presignada
       Metadata: {
         'version': version,
         'upload-date': new Date().toISOString(),
-        'file-size': fileSize.toString(),
+        'file-size': fileSize ? fileSize.toString() : 'unknown',
         'original-name': fileName || `zodiac-app-v${version}.apk`
       }
     });
 
-    // Generar URL firmada (válida por 10 minutos)
+    // Generar URL firmada (válida por 15 minutos)
     const presignedUrl = await getSignedUrl(s3Client, putObjectCommand, { 
-      expiresIn: 600 // 10 minutos
+      expiresIn: 900 // 15 minutos
     });
 
-    console.log(`🔗 URL presignada generada para APK v${version}`);
+    console.log(`🔗 URL presignada generada para APK v${version}:`);
+    console.log(`   Bucket: ${S3_BUCKET}`);
+    console.log(`   Key: ${s3Key}`);
+    console.log(`   URL: ${presignedUrl.substring(0, 100)}...`);
 
     res.json({
       success: true,
@@ -301,8 +307,9 @@ app.post('/api/upload/presigned', async (req, res) => {
         s3Key: s3Key,
         s3Bucket: S3_BUCKET,
         version: version,
-        expiresIn: 600, // segundos
-        uploadMethod: 'PUT' // Método HTTP a usar
+        expiresIn: 900, // segundos
+        uploadMethod: 'PUT', // Método HTTP a usar
+        contentType: 'application/vnd.android.package-archive'
       }
     });
   } catch (error) {

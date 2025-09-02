@@ -4,29 +4,16 @@ class ApiService {
   constructor(baseURL) {
     this.api = axios.create({
       baseURL: baseURL,
-      timeout: 600000, // 10 minutos para uploads grandes (tu API permite todo)
-      withCredentials: false, // Compatible con tu origin: '*'
+      timeout: 10000,
       headers: {
-        'Accept': 'application/json'
-        // Removemos Content-Type por defecto para mayor flexibilidad
+        'Content-Type': 'application/json'
       }
     })
 
-    // Request interceptor simplificado
+    // Request interceptor
     this.api.interceptors.request.use(
       (config) => {
-        console.log(`🌐 ${config.method?.toUpperCase()} ${config.url}`)
-        
-        // Para FormData, el navegador establecerá Content-Type automáticamente
-        if (config.data instanceof FormData) {
-          // No establecer Content-Type para que el navegador agregue boundary
-          delete config.headers['Content-Type']
-          console.log('📤 FormData upload detected, removing Content-Type header')
-        } else if (!config.headers['Content-Type']) {
-          // Solo para requests JSON
-          config.headers['Content-Type'] = 'application/json'
-        }
-        
+        console.log(`Making ${config.method?.toUpperCase()} request to ${config.url}`)
         return config
       },
       (error) => {
@@ -34,18 +21,13 @@ class ApiService {
       }
     )
 
-    // Response interceptor simplificado
+    // Response interceptor
     this.api.interceptors.response.use(
       (response) => {
-        console.log(`✅ ${response.status} ${response.config.method?.toUpperCase()} ${response.config.url}`)
         return response.data
       },
       (error) => {
-        const status = error.response?.status
-        const url = error.config?.url
-        console.error(`❌ ${status || 'NETWORK'} ${error.config?.method?.toUpperCase()} ${url}`)
-        console.error('Error details:', error.response?.data || error.message)
-        
+        console.error('API Error:', error.response?.data || error.message)
         return Promise.reject(error)
       }
     )
@@ -76,51 +58,44 @@ class ApiService {
     return await this.api.delete(`/api/version/${version}`)
   }
 
-  // Upload APK using presigned URL (direct to S3)
+  // Upload APK using presigned URL (direct to S3) - CORREGIDO
   async uploadApk(uploadData, onUploadProgress) {
     console.log(`🚀 Iniciando upload directo a S3 v${uploadData.version} (${(uploadData.file.size / 1024 / 1024).toFixed(2)}MB)`)
 
     try {
-      // Paso 1: Obtener URL presignada del servidor
+      // PASO 1: Obtener URL presignada del servidor
       console.log('📡 Solicitando URL presignada...')
       const presignedResponse = await this.api.post('/api/upload/presigned', {
         version: uploadData.version,
         fileSize: uploadData.file.size,
-        fileName: uploadData.file.name,
-        releaseNotes: uploadData.releaseNotes || '',
-        minAndroidVersion: uploadData.minAndroidVersion || '5.0',
-        targetSdkVersion: uploadData.targetSdkVersion || 33
+        fileName: uploadData.file.name
       })
 
-      const { presignedUrl, s3Key, s3Bucket, version, expiresIn } = presignedResponse.data
-      console.log(`✅ URL presignada obtenida (válida por ${expiresIn}s)`)
+      if (!presignedResponse.success) {
+        throw new Error(presignedResponse.message || 'Error obteniendo URL presignada')
+      }
 
-      // Paso 2: Upload directo a S3 usando la URL presignada
+      const presignedData = presignedResponse.data
+      console.log(`✅ URL presignada obtenida (válida por ${presignedData.expiresIn}s)`)
+
+      // PASO 2: Upload directo a S3 usando XMLHttpRequest (para progress tracking)
       console.log('📤 Subiendo directamente a AWS S3...')
       
-      const s3UploadResponse = await axios.put(presignedUrl, uploadData.file, {
-        headers: {
-          'Content-Type': 'application/vnd.android.package-archive'
-        },
-        timeout: 600000, // 10 minutos
-        onUploadProgress: (progressEvent) => {
-          if (progressEvent.lengthComputable) {
-            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-            onUploadProgress?.(progress)
-          }
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity
-      })
+      const uploadResult = await this.uploadFileToS3WithProgress(
+        presignedData.presignedUrl,
+        uploadData.file,
+        presignedData.contentType,
+        onUploadProgress
+      )
 
       console.log('✅ Upload directo a S3 completado')
 
-      // Paso 3: Confirmar al servidor que el upload fue exitoso y guardar metadata
-      console.log('💾 Guardando metadata en base de datos...')
+      // PASO 3: Confirmar al servidor que el upload fue exitoso
+      console.log('💾 Confirmando upload en base de datos...')
       const confirmResponse = await this.api.post('/api/upload/confirm', {
         version: uploadData.version,
-        s3Key: s3Key,
-        s3Bucket: s3Bucket,
+        s3Key: presignedData.s3Key,
+        s3Bucket: presignedData.s3Bucket,
         fileSize: uploadData.file.size,
         fileName: uploadData.file.name,
         releaseNotes: uploadData.releaseNotes || '',
@@ -128,20 +103,70 @@ class ApiService {
         targetSdkVersion: uploadData.targetSdkVersion || 33
       })
 
-      console.log('✅ Metadata guardada exitosamente')
+      console.log('✅ Upload confirmado exitosamente')
       return confirmResponse
 
     } catch (error) {
       console.error('❌ Error en upload directo a S3:', error)
       
       // Si el upload directo falla, intentar método tradicional como fallback
-      if (error.response?.status === 404 || error.message.includes('presigned')) {
+      if (error.message.includes('presigned') || error.message.includes('403') || error.message.includes('Forbidden')) {
         console.log('🔄 Fallback: intentando upload tradicional...')
         return await this.uploadApkTraditional(uploadData, onUploadProgress)
       }
       
       throw error
     }
+  }
+
+  // Upload directo a S3 con progress usando XMLHttpRequest
+  uploadFileToS3WithProgress(presignedUrl, file, contentType, onProgress) {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest()
+      
+      // Configurar progress tracking
+      xhr.upload.addEventListener('progress', (event) => {
+        if (event.lengthComputable) {
+          const percentComplete = Math.round((event.loaded / event.total) * 100)
+          console.log(`📊 Progreso S3: ${percentComplete}%`)
+          onProgress?.(percentComplete)
+        }
+      })
+      
+      // Manejo de eventos
+      xhr.addEventListener('load', () => {
+        console.log(`📋 S3 Response Status: ${xhr.status}`)
+        
+        if (xhr.status >= 200 && xhr.status < 300) {
+          console.log('✅ Upload exitoso a S3')
+          resolve({ success: true, status: xhr.status })
+        } else {
+          const errorText = xhr.responseText
+          console.error('❌ Error S3 Response:', errorText)
+          reject(new Error(`S3 Upload failed: ${xhr.status} - ${errorText}`))
+        }
+      })
+      
+      xhr.addEventListener('error', (event) => {
+        console.error('❌ XHR Network Error:', event)
+        reject(new Error('Network error during S3 upload'))
+      })
+      
+      xhr.addEventListener('timeout', () => {
+        console.error('❌ XHR Timeout')
+        reject(new Error('S3 upload timeout'))
+      })
+      
+      // Configurar timeout (10 minutos)
+      xhr.timeout = 600000
+      
+      // Preparar y enviar request a S3
+      xhr.open('PUT', presignedUrl)
+      xhr.setRequestHeader('Content-Type', contentType || 'application/vnd.android.package-archive')
+      
+      console.log(`📤 Enviando ${(file.size / 1024 / 1024).toFixed(2)}MB a S3...`)
+      xhr.send(file)
+    })
   }
 
   // Método de upload tradicional como fallback
