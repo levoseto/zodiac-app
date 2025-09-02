@@ -10,8 +10,9 @@ const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
 
-// AWS SDK v3 - Importaciones modulares
+// AWS SDK v3 - Importaciones modulares (agregar getSignedUrl)
 const { S3Client, PutObjectCommand, HeadObjectCommand, DeleteObjectCommand, HeadBucketCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -244,7 +245,75 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3. Subir nueva versión del APK con AWS S3 SDK v3
+// 3A. Generar URL firmada para upload directo a S3 (NUEVO)
+app.post('/api/upload/presigned', async (req, res) => {
+  try {
+    // Headers CORS
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', '*');
+    res.header('Access-Control-Allow-Headers', '*');
+    
+    const { version, fileSize, fileName } = req.body;
+
+    if (!version || !semver.valid(version)) {
+      return res.status(400).json({
+        success: false,
+        message: 'Versión requerida y debe ser válida (formato semver)'
+      });
+    }
+
+    // Verificar si la versión ya existe
+    const existingVersion = await AppVersion.findOne({ version });
+    if (existingVersion) {
+      return res.status(409).json({
+        success: false,
+        message: 'La versión ya existe'
+      });
+    }
+
+    const s3Key = `apks/${version}/zodiac-app-v${version}.apk`;
+    
+    // Crear comando para generar URL presignada
+    const putObjectCommand = new PutObjectCommand({
+      Bucket: S3_BUCKET,
+      Key: s3Key,
+      ContentType: 'application/vnd.android.package-archive',
+      ContentDisposition: `attachment; filename="zodiac-app-v${version}.apk"`,
+      Metadata: {
+        'version': version,
+        'upload-date': new Date().toISOString(),
+        'file-size': fileSize.toString(),
+        'original-name': fileName || `zodiac-app-v${version}.apk`
+      }
+    });
+
+    // Generar URL firmada (válida por 10 minutos)
+    const presignedUrl = await getSignedUrl(s3Client, putObjectCommand, { 
+      expiresIn: 600 // 10 minutos
+    });
+
+    console.log(`🔗 URL presignada generada para APK v${version}`);
+
+    res.json({
+      success: true,
+      data: {
+        presignedUrl: presignedUrl,
+        s3Key: s3Key,
+        s3Bucket: S3_BUCKET,
+        version: version,
+        expiresIn: 600, // segundos
+        uploadMethod: 'PUT' // Método HTTP a usar
+      }
+    });
+  } catch (error) {
+    console.error('Error generando URL presignada:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Error del servidor',
+      error: error.message
+    });
+  }
+});
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
     // Headers súper permisivos

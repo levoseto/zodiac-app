@@ -76,8 +76,76 @@ class ApiService {
     return await this.api.delete(`/api/version/${version}`)
   }
 
-  // Upload APK - Optimizado para tu CORS permisivo
+  // Upload APK using presigned URL (direct to S3)
   async uploadApk(uploadData, onUploadProgress) {
+    console.log(`🚀 Iniciando upload directo a S3 v${uploadData.version} (${(uploadData.file.size / 1024 / 1024).toFixed(2)}MB)`)
+
+    try {
+      // Paso 1: Obtener URL presignada del servidor
+      console.log('📡 Solicitando URL presignada...')
+      const presignedResponse = await this.api.post('/api/upload/presigned', {
+        version: uploadData.version,
+        fileSize: uploadData.file.size,
+        fileName: uploadData.file.name,
+        releaseNotes: uploadData.releaseNotes || '',
+        minAndroidVersion: uploadData.minAndroidVersion || '5.0',
+        targetSdkVersion: uploadData.targetSdkVersion || 33
+      })
+
+      const { presignedUrl, s3Key, s3Bucket, version, expiresIn } = presignedResponse.data
+      console.log(`✅ URL presignada obtenida (válida por ${expiresIn}s)`)
+
+      // Paso 2: Upload directo a S3 usando la URL presignada
+      console.log('📤 Subiendo directamente a AWS S3...')
+      
+      const s3UploadResponse = await axios.put(presignedUrl, uploadData.file, {
+        headers: {
+          'Content-Type': 'application/vnd.android.package-archive'
+        },
+        timeout: 600000, // 10 minutos
+        onUploadProgress: (progressEvent) => {
+          if (progressEvent.lengthComputable) {
+            const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+            onUploadProgress?.(progress)
+          }
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity
+      })
+
+      console.log('✅ Upload directo a S3 completado')
+
+      // Paso 3: Confirmar al servidor que el upload fue exitoso y guardar metadata
+      console.log('💾 Guardando metadata en base de datos...')
+      const confirmResponse = await this.api.post('/api/upload/confirm', {
+        version: uploadData.version,
+        s3Key: s3Key,
+        s3Bucket: s3Bucket,
+        fileSize: uploadData.file.size,
+        fileName: uploadData.file.name,
+        releaseNotes: uploadData.releaseNotes || '',
+        minAndroidVersion: uploadData.minAndroidVersion || '5.0',
+        targetSdkVersion: uploadData.targetSdkVersion || 33
+      })
+
+      console.log('✅ Metadata guardada exitosamente')
+      return confirmResponse
+
+    } catch (error) {
+      console.error('❌ Error en upload directo a S3:', error)
+      
+      // Si el upload directo falla, intentar método tradicional como fallback
+      if (error.response?.status === 404 || error.message.includes('presigned')) {
+        console.log('🔄 Fallback: intentando upload tradicional...')
+        return await this.uploadApkTraditional(uploadData, onUploadProgress)
+      }
+      
+      throw error
+    }
+  }
+
+  // Método de upload tradicional como fallback
+  async uploadApkTraditional(uploadData, onUploadProgress) {
     const formData = new FormData()
     formData.append('apk', uploadData.file)
     formData.append('version', uploadData.version)
@@ -85,7 +153,7 @@ class ApiService {
     formData.append('minAndroidVersion', uploadData.minAndroidVersion || '5.0')
     formData.append('targetSdkVersion', uploadData.targetSdkVersion || '33')
 
-    console.log(`🚀 Iniciando upload de APK v${uploadData.version} (${(uploadData.file.size / 1024 / 1024).toFixed(2)}MB)`)
+    console.log(`🔄 Upload tradicional de APK v${uploadData.version}`)
 
     const config = {
       timeout: 600000, // 10 minutos
@@ -95,7 +163,6 @@ class ApiService {
           onUploadProgress?.(progress)
         }
       },
-      // Sin restricciones de content length ya que tu API permite todo
       maxContentLength: Infinity,
       maxBodyLength: Infinity
     }

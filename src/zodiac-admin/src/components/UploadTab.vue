@@ -113,10 +113,10 @@
         >
       </div>
 
-      <!-- Progress Section Mejorada -->
+      <!-- Progress Section para Upload Directo a S3 -->
       <div v-if="uploadProgress > 0 && uploadProgress < 100" class="form-group">
         <label>
-          <i class="fab fa-aws"></i> Subiendo a AWS S3
+          <i class="fab fa-aws"></i> Upload Directo a AWS S3
           <span v-if="uploadSpeed" class="upload-speed">{{ uploadSpeed }} MB/s</span>
         </label>
         <div class="progress-container">
@@ -128,24 +128,40 @@
             <span v-if="estimatedTime" class="progress-eta">ETA: {{ estimatedTime }}</span>
           </div>
         </div>
+        <div class="upload-steps" style="margin-top: 10px;">
+          <small v-if="uploadProgress < 10">📡 Obteniendo URL presignada...</small>
+          <small v-else-if="uploadProgress < 95">📤 Subiendo directo a S3...</small>
+          <small v-else>💾 Confirmando en base de datos...</small>
+        </div>
       </div>
 
-      <!-- Success Message -->
+      <!-- Success Message Mejorado -->
       <div v-if="uploadProgress === 100" class="upload-complete" style="margin-bottom: 20px;">
         <i class="fas fa-check-circle"></i>
-        <strong>Upload completado exitosamente a AWS S3!</strong>
+        <strong>Upload directo a AWS S3 completado!</strong>
+        <br>
+        <small>Archivo subido directamente sin pasar por Vercel</small>
       </div>
 
       <!-- API Info Section -->
       <div class="api-info" style="margin-bottom: 20px; padding: 15px; background: #e8f5e8; border-radius: 8px; border-left: 4px solid #4caf50;">
-        <h4><i class="fas fa-rocket"></i> Configuración Optimizada</h4>
+        <h4><i class="fas fa-rocket"></i> Upload Directo a S3</h4>
         <ul style="margin: 10px 0; padding-left: 20px;">
-          <li>✅ CORS completamente permisivo configurado</li>
-          <li>✅ Upload directo sin restricciones</li>
-          <li>✅ Límite de 200MB por archivo</li>
-          <li>✅ Almacenamiento seguro en AWS S3</li>
-          <li>✅ Timeout de 10 minutos para archivos grandes</li>
+          <li>✅ <strong>Sin límites de Vercel</strong> - Upload directo a AWS S3</li>
+          <li>✅ <strong>URLs presignadas</strong> - Seguridad y control de acceso</li>
+          <li>✅ <strong>Velocidad máxima</strong> - Sin proxy, directo a S3</li>
+          <li>✅ <strong>Archivos hasta 200MB</strong> - Sin restricciones del servidor</li>
+          <li>✅ <strong>Fallback automático</strong> - Método tradicional si falla</li>
         </ul>
+        <div class="upload-flow" style="margin-top: 15px; padding: 10px; background: rgba(255,255,255,0.7); border-radius: 5px;">
+          <strong>Flujo de Upload:</strong>
+          <br>
+          <small>
+            1️⃣ Solicitar URL presignada al servidor<br>
+            2️⃣ Upload directo a AWS S3<br>
+            3️⃣ Confirmar y guardar metadata
+          </small>
+        </div>
       </div>
 
       <button type="submit" class="btn btn-primary" :disabled="!form.file || uploading">
