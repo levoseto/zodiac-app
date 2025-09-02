@@ -9,9 +9,17 @@ const semver = require('semver');
 const helmet = require('helmet');
 const compression = require('compression');
 const rateLimit = require('express-rate-limit');
+const cloudinary = require('cloudinary').v2;
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+
+// Configurar Cloudinary
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET
+});
 
 // Middleware de seguridad y optimización
 app.use(helmet());
@@ -58,6 +66,10 @@ const AppVersionSchema = new mongoose.Schema({
     type: String,
     required: true
   },
+  cloudinaryPublicId: {
+    type: String,
+    required: true
+  },
   fileSize: {
     type: Number,
     required: true
@@ -84,9 +96,9 @@ const AppVersionSchema = new mongoose.Schema({
 
 const AppVersion = mongoose.model('AppVersion', AppVersionSchema);
 
-// SOLUCIÓN: Usar memoryStorage en lugar de diskStorage
+// Configurar multer para memory storage
 const upload = multer({ 
-  storage: multer.memoryStorage(), // Almacenar en memoria primero
+  storage: multer.memoryStorage(),
   limits: {
     fileSize: 100 * 1024 * 1024 // 100MB límite
   },
@@ -99,9 +111,6 @@ const upload = multer({
     }
   }
 });
-
-// Middleware para servir archivos estáticos
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // ENDPOINTS DE LA API
 
@@ -188,7 +197,7 @@ app.get('/api/version/compare/:currentVersion', async (req, res) => {
   }
 });
 
-// 3. ENDPOINT CORREGIDO: Subir nueva versión del APK
+// 3. Subir nueva versión del APK con Cloudinary
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
     if (!req.file) {
@@ -216,23 +225,31 @@ app.post('/api/upload', upload.single('apk'), async (req, res) => {
       });
     }
 
-    // NUEVO: Ahora creamos el directorio y archivo manualmente
-    const uploadDir = path.join(__dirname, 'uploads', 'apks', version);
-    const fileName = `zodiac-app-v${version}.apk`;
-    const filePath = path.join(uploadDir, fileName);
+    console.log(`📤 Subiendo APK v${version} a Cloudinary...`);
 
-    // Crear directorio si no existe
-    fs.mkdirSync(uploadDir, { recursive: true });
+    // Convertir buffer a base64 para Cloudinary
+    const base64File = `data:application/vnd.android.package-archive;base64,${req.file.buffer.toString('base64')}`;
+    
+    const publicId = `zodiac-app/apks/zodiac-app-v${version}`;
+    
+    // Subir a Cloudinary
+    const uploadResult = await cloudinary.uploader.upload(base64File, {
+      resource_type: 'raw', // Para archivos que no son imágenes/videos
+      public_id: publicId,
+      access_mode: 'public',
+      use_filename: true,
+      unique_filename: false
+    });
 
-    // Escribir el archivo desde el buffer de memoria
-    fs.writeFileSync(filePath, req.file.buffer);
+    console.log(`✅ APK subido exitosamente a Cloudinary: ${uploadResult.secure_url}`);
 
     const newVersion = new AppVersion({
       version,
       releaseNotes: releaseNotes || '',
-      apkFileName: fileName,
-      apkPath: filePath,
-      fileSize: req.file.size, // Tamaño desde req.file
+      apkFileName: `zodiac-app-v${version}.apk`,
+      apkPath: uploadResult.secure_url,
+      cloudinaryPublicId: uploadResult.public_id,
+      fileSize: req.file.size,
       minAndroidVersion: minAndroidVersion || '5.0',
       targetSdkVersion: parseInt(targetSdkVersion) || 33
     });
@@ -245,7 +262,9 @@ app.post('/api/upload', upload.single('apk'), async (req, res) => {
       data: {
         version: newVersion.version,
         fileSize: newVersion.fileSize,
-        uploadDate: newVersion.uploadDate
+        uploadDate: newVersion.uploadDate,
+        downloadUrl: `/api/download/${version}`,
+        cloudinaryUrl: uploadResult.secure_url
       }
     });
   } catch (error) {
@@ -272,23 +291,11 @@ app.get('/api/download/:version', async (req, res) => {
       });
     }
 
-    const filePath = appVersion.apkPath;
-    
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({
-        success: false,
-        message: 'Archivo APK no encontrado en el servidor'
-      });
-    }
+    console.log(`📥 Descargando APK v${version} desde Cloudinary`);
 
-    // Configurar headers para descarga
+    // Configurar headers para descarga y redirigir a Cloudinary
     res.setHeader('Content-Disposition', `attachment; filename="${appVersion.apkFileName}"`);
-    res.setHeader('Content-Type', 'application/vnd.android.package-archive');
-    res.setHeader('Content-Length', appVersion.fileSize);
-
-    // Enviar archivo
-    const fileStream = fs.createReadStream(filePath);
-    fileStream.pipe(res);
+    res.redirect(appVersion.apkPath);
   } catch (error) {
     console.error('Error descargando APK:', error);
     res.status(500).json({
@@ -305,7 +312,7 @@ app.get('/api/versions', async (req, res) => {
     const versions = await AppVersion
       .find({ isActive: true })
       .sort({ version: -1, uploadDate: -1 })
-      .select('-apkPath')
+      .select('-apkPath -cloudinaryPublicId')
       .exec();
 
     res.json({
@@ -331,7 +338,7 @@ app.get('/api/versions', async (req, res) => {
   }
 });
 
-// 6. Eliminar versión (soft delete)
+// 6. Eliminar versión (soft delete + eliminar de Cloudinary)
 app.delete('/api/version/:version', async (req, res) => {
   try {
     const { version } = req.params;
@@ -344,6 +351,18 @@ app.delete('/api/version/:version', async (req, res) => {
       });
     }
 
+    // Eliminar de Cloudinary
+    try {
+      await cloudinary.uploader.destroy(appVersion.cloudinaryPublicId, {
+        resource_type: 'raw'
+      });
+      console.log(`🗑️ APK v${version} eliminado de Cloudinary`);
+    } catch (cloudinaryError) {
+      console.warn('Error eliminando de Cloudinary:', cloudinaryError.message);
+      // Continuar aunque falle la eliminación de Cloudinary
+    }
+
+    // Soft delete en la base de datos
     appVersion.isActive = false;
     await appVersion.save();
 
@@ -361,12 +380,49 @@ app.delete('/api/version/:version', async (req, res) => {
   }
 });
 
+// 7. Endpoint para verificar configuración de Cloudinary
+app.get('/api/cloudinary/status', async (req, res) => {
+  try {
+    // Verificar configuración
+    const config = cloudinary.config();
+    
+    if (!config.cloud_name || !config.api_key || !config.api_secret) {
+      return res.status(500).json({
+        success: false,
+        message: 'Configuración de Cloudinary incompleta',
+        config: {
+          cloud_name: !!config.cloud_name,
+          api_key: !!config.api_key,
+          api_secret: !!config.api_secret
+        }
+      });
+    }
+
+    // Hacer una prueba simple a la API
+    const result = await cloudinary.api.ping();
+    
+    res.json({
+      success: true,
+      message: 'Cloudinary configurado correctamente',
+      cloudName: config.cloud_name,
+      status: result.status
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: 'Error conectando con Cloudinary',
+      error: error.message
+    });
+  }
+});
+
 // Endpoint de health check
 app.get('/api/health', (req, res) => {
   res.json({
     success: true,
     message: 'API funcionando correctamente',
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
+    cloudinary: !!process.env.CLOUDINARY_CLOUD_NAME
   });
 });
 
@@ -392,6 +448,7 @@ app.use('*', (req, res) => {
 app.listen(PORT, () => {
   console.log(`🚀 Servidor ejecutándose en puerto ${PORT}`);
   console.log(`📱 API de Zodiac App Updater lista!`);
+  console.log(`☁️ Cloudinary configurado: ${!!process.env.CLOUDINARY_CLOUD_NAME}`);
 });
 
 module.exports = app;
