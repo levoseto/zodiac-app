@@ -9,6 +9,20 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    sourcemap: true
+    sourcemap: false,
+    minify: 'esbuild',
+    target: 'esnext',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          vendor: ['vue'],
+          http: ['axios']
+        }
+      }
+    },
+    chunkSizeWarningLimit: 1000
+  },
+  esbuild: {
+    drop: ['console', 'debugger']
   }
 })
