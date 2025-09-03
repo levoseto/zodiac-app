@@ -387,9 +387,9 @@ app.post('/api/upload/confirm', async (req, res) => {
 app.post('/api/upload', upload.single('apk'), async (req, res) => {
   try {
     // Headers adicionales para CORS y archivos grandes
-    res.header('Access-Control-Allow-Origin', req.headers.origin);
-    res.header('Access-Control-Allow-Methods', 'POST, OPTIONS');
-    res.header('Access-Control-Allow-Headers', 'Content-Type, Authorization, Content-Length, X-Requested-With');
+    res.header('Access-Control-Allow-Origin', '*');
+    res.header('Access-Control-Allow-Methods', '*');
+    res.header('Access-Control-Allow-Headers', '*');
     
     if (!req.file) {
       return res.status(400).json({
