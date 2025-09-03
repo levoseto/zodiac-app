@@ -1,235 +1,269 @@
 import axios from 'axios'
 
 class ApiService {
-  constructor(baseURL) {
-    this.api = axios.create({
-      baseURL: baseURL,
-      timeout: 10000,
+  constructor() {
+    this.baseURL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3000/api'
+    
+    // Configurar instancia de axios
+    this.axios = axios.create({
+      baseURL: this.baseURL,
+      timeout: 30000, // 30 segundos para uploads grandes
       headers: {
         'Content-Type': 'application/json'
       }
     })
 
-    // Request interceptor
-    this.api.interceptors.request.use(
-      (config) => {
-        console.log(`Making ${config.method?.toUpperCase()} request to ${config.url}`)
-        return config
-      },
+    // Interceptores para manejo de respuestas
+    this.axios.interceptors.response.use(
+      (response) => response,
       (error) => {
-        return Promise.reject(error)
-      }
-    )
-
-    // Response interceptor
-    this.api.interceptors.response.use(
-      (response) => {
-        return response.data
-      },
-      (error) => {
-        console.error('API Error:', error.response?.data || error.message)
+        console.error('Error en API:', error.response?.data || error.message)
         return Promise.reject(error)
       }
     )
   }
 
-  // Health check
-  async checkHealth() {
-    return await this.api.get('/api/health')
-  }
+  // ==================== VERSIONES ====================
 
-  // Get all versions
-  async getVersions() {
-    return await this.api.get('/api/versions')
-  }
-
-  // Get latest version
+  /**
+   * Obtener la versión más reciente
+   */
   async getLatestVersion() {
-    return await this.api.get('/api/version/latest')
+    const response = await this.axios.get('/version/latest')
+    return response.data
   }
 
-  // Compare version
+  /**
+   * Comparar versión actual con la más reciente
+   */
   async compareVersion(currentVersion) {
-    return await this.api.get(`/api/version/compare/${currentVersion}`)
+    const response = await this.axios.get(`/version/compare/${currentVersion}`)
+    return response.data
   }
 
-  // Delete version
+  /**
+   * Obtener todas las versiones
+   */
+  async getAllVersions() {
+    const response = await this.axios.get('/versions')
+    return response.data
+  }
+
+  /**
+   * Eliminar una versión específica
+   */
   async deleteVersion(version) {
-    return await this.api.delete(`/api/version/${version}`)
+    const response = await this.axios.delete(`/version/${version}`)
+    return response.data
   }
 
-  // Upload APK using presigned URL (direct to S3) - CORREGIDO
-  async uploadApk(uploadData, onUploadProgress) {
-    console.log(`🚀 Iniciando upload directo a S3 v${uploadData.version} (${(uploadData.file.size / 1024 / 1024).toFixed(2)}MB)`)
+  // ==================== UPLOAD TRADICIONAL ====================
 
-    try {
-      // PASO 1: Obtener URL presignada del servidor
-      console.log('📡 Solicitando URL presignada...')
-      const presignedResponse = await this.api.post('/api/upload/presigned', {
-        version: uploadData.version,
-        fileSize: uploadData.file.size,
-        fileName: uploadData.file.name
-      })
-
-      if (!presignedResponse.success) {
-        throw new Error(presignedResponse.message || 'Error obteniendo URL presignada')
+  /**
+   * Subir APK usando método tradicional (para archivos pequeños)
+   */
+  async uploadApk(formData, onProgress = null) {
+    const config = {
+      headers: {
+        'Content-Type': 'multipart/form-data'
       }
+    }
 
-      const presignedData = presignedResponse.data
-      console.log(`✅ URL presignada obtenida (válida por ${presignedData.expiresIn}s)`)
+    if (onProgress) {
+      config.onUploadProgress = (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        onProgress(percentCompleted)
+      }
+    }
 
-      // PASO 2: Upload directo a S3 usando XMLHttpRequest (para progress tracking)
-      console.log('📤 Subiendo directamente a AWS S3...')
-      
-      const uploadResult = await this.uploadFileToS3WithProgress(
-        presignedData.presignedUrl,
-        uploadData.file,
-        presignedData.contentType,
-        onUploadProgress
+    const response = await this.axios.post('/upload', formData, config)
+    return response.data
+  }
+
+  // ==================== UPLOAD DIRECTO A S3 ====================
+
+  /**
+   * Generar URL pre-firmada para upload directo a S3
+   */
+  async generatePresignedUrl(version, fileSize, fileName) {
+    const response = await this.axios.post('/upload/presigned', {
+      version,
+      fileSize,
+      fileName
+    })
+    return response.data
+  }
+
+  /**
+   * Subir archivo directamente a S3 usando URL pre-firmada
+   */
+  async uploadToS3(presignedUrl, file, onProgress = null) {
+    const config = {
+      headers: {
+        'Content-Type': 'application/vnd.android.package-archive'
+      }
+    }
+
+    if (onProgress) {
+      config.onUploadProgress = (progressEvent) => {
+        const percentCompleted = Math.round((progressEvent.loaded * 100) / progressEvent.total)
+        onProgress(percentCompleted)
+      }
+    }
+
+    // Usar axios para subir directamente a S3
+    const response = await axios.put(presignedUrl, file, config)
+    return response
+  }
+
+  /**
+   * Confirmar que el upload a S3 fue exitoso
+   */
+  async confirmUpload(uploadData) {
+    const response = await this.axios.post('/upload/confirm', uploadData)
+    return response.data
+  }
+
+  /**
+   * Proceso completo de upload directo a S3
+   */
+  async uploadApkToS3(file, version, releaseNotes = '', minAndroidVersion = '5.0', targetSdkVersion = 33, onProgress = null) {
+    try {
+      // Paso 1: Generar URL pre-firmada
+      const presignedData = await this.generatePresignedUrl(
+        version, 
+        file.size, 
+        file.name
       )
 
-      console.log('✅ Upload directo a S3 completado')
+      // Paso 2: Subir archivo a S3
+      await this.uploadToS3(presignedData.data.presignedUrl, file, onProgress)
 
-      // PASO 3: Confirmar al servidor que el upload fue exitoso
-      console.log('💾 Confirmando upload en base de datos...')
-      const confirmResponse = await this.api.post('/api/upload/confirm', {
-        version: uploadData.version,
-        s3Key: presignedData.s3Key,
-        s3Bucket: presignedData.s3Bucket,
-        fileSize: uploadData.file.size,
-        fileName: uploadData.file.name,
-        releaseNotes: uploadData.releaseNotes || '',
-        minAndroidVersion: uploadData.minAndroidVersion || '5.0',
-        targetSdkVersion: uploadData.targetSdkVersion || 33
+      // Paso 3: Confirmar el upload
+      const confirmData = await this.confirmUpload({
+        version,
+        s3Key: presignedData.data.s3Key,
+        s3Bucket: presignedData.data.s3Bucket,
+        fileSize: file.size,
+        fileName: file.name,
+        releaseNotes,
+        minAndroidVersion,
+        targetSdkVersion
       })
 
-      console.log('✅ Upload confirmado exitosamente')
-      return confirmResponse
-
+      return confirmData
     } catch (error) {
-      console.error('❌ Error en upload directo a S3:', error)
-      
-      // Si el upload directo falla, intentar método tradicional como fallback
-      if (error.message.includes('presigned') || error.message.includes('403') || error.message.includes('Forbidden')) {
-        console.log('🔄 Fallback: intentando upload tradicional...')
-        return await this.uploadApkTraditional(uploadData, onUploadProgress)
-      }
-      
+      console.error('Error en upload a S3:', error)
       throw error
     }
   }
 
-  // Upload directo a S3 con progress usando XMLHttpRequest
-  uploadFileToS3WithProgress(presignedUrl, file, contentType, onProgress) {
-    return new Promise((resolve, reject) => {
-      const xhr = new XMLHttpRequest()
-      
-      // Configurar progress tracking
-      xhr.upload.addEventListener('progress', (event) => {
-        if (event.lengthComputable) {
-          const percentComplete = Math.round((event.loaded / event.total) * 100)
-          console.log(`📊 Progreso S3: ${percentComplete}%`)
-          onProgress?.(percentComplete)
-        }
-      })
-      
-      // Manejo de eventos
-      xhr.addEventListener('load', () => {
-        console.log(`📋 S3 Response Status: ${xhr.status}`)
-        
-        if (xhr.status >= 200 && xhr.status < 300) {
-          console.log('✅ Upload exitoso a S3')
-          resolve({ success: true, status: xhr.status })
-        } else {
-          const errorText = xhr.responseText
-          console.error('❌ Error S3 Response:', errorText)
-          reject(new Error(`S3 Upload failed: ${xhr.status} - ${errorText}`))
-        }
-      })
-      
-      xhr.addEventListener('error', (event) => {
-        console.error('❌ XHR Network Error:', event)
-        reject(new Error('Network error during S3 upload'))
-      })
-      
-      xhr.addEventListener('timeout', () => {
-        console.error('❌ XHR Timeout')
-        reject(new Error('S3 upload timeout'))
-      })
-      
-      // Configurar timeout (10 minutos)
-      xhr.timeout = 600000
-      
-      // Preparar y enviar request a S3
-      xhr.open('PUT', presignedUrl)
-      xhr.setRequestHeader('Content-Type', contentType || 'application/vnd.android.package-archive')
-      
-      console.log(`📤 Enviando ${(file.size / 1024 / 1024).toFixed(2)}MB a S3...`)
-      xhr.send(file)
-    })
-  }
+  // ==================== DESCARGAS ====================
 
-  // Método de upload tradicional como fallback
-  async uploadApkTraditional(uploadData, onUploadProgress) {
-    const formData = new FormData()
-    formData.append('apk', uploadData.file)
-    formData.append('version', uploadData.version)
-    formData.append('releaseNotes', uploadData.releaseNotes || '')
-    formData.append('minAndroidVersion', uploadData.minAndroidVersion || '5.0')
-    formData.append('targetSdkVersion', uploadData.targetSdkVersion || '33')
-
-    console.log(`🔄 Upload tradicional de APK v${uploadData.version}`)
-
-    const config = {
-      timeout: 600000, // 10 minutos
-      onUploadProgress: (progressEvent) => {
-        if (progressEvent.lengthComputable) {
-          const progress = Math.round((progressEvent.loaded * 100) / progressEvent.total)
-          onUploadProgress?.(progress)
-        }
-      },
-      maxContentLength: Infinity,
-      maxBodyLength: Infinity
-    }
-
-    return await this.api.post('/api/upload', formData, config)
-  }
-
-  // Get S3 status
-  async getS3Status() {
-    return await this.api.get('/api/s3/status')
-  }
-
-  // Get usage stats
-  async getStats() {
-    return await this.api.get('/api/stats')
-  }
-
-  // Get download URL
+  /**
+   * Obtener URL de descarga para una versión específica
+   */
   getDownloadUrl(version) {
-    return `${this.api.defaults.baseURL}/api/download/${version}`
+    return `${this.baseURL}/download/${version}`
   }
 
-  // Test de conectividad simple (ya no necesitamos test CORS específico)
-  async testConnection() {
-    try {
-      console.log('🧪 Testing API connectivity...')
-      const response = await this.api.get('/api/health')
-      console.log('✅ API connection successful')
-      return { 
-        success: true, 
-        data: response,
-        message: 'Conexión API exitosa'
-      }
-    } catch (error) {
-      console.error('❌ API connection failed:', error.message)
-      return { 
-        success: false, 
-        error: error.message,
-        message: 'Error de conectividad con la API'
-      }
+  /**
+   * Descargar APK (redirige al endpoint de descarga)
+   */
+  async downloadApk(version) {
+    const url = this.getDownloadUrl(version)
+    window.open(url, '_blank')
+  }
+
+  // ==================== ESTADÍSTICAS Y ESTADO ====================
+
+  /**
+   * Obtener estadísticas de uso
+   */
+  async getStats() {
+    const response = await this.axios.get('/stats')
+    return response.data
+  }
+
+  /**
+   * Verificar estado de la API
+   */
+  async getHealthStatus() {
+    const response = await this.axios.get('/health')
+    return response.data
+  }
+
+  /**
+   * Verificar estado de S3
+   */
+  async getS3Status() {
+    const response = await this.axios.get('/s3/status')
+    return response.data
+  }
+
+  // ==================== UTILIDADES ====================
+
+  /**
+   * Determinar si usar upload tradicional o directo a S3
+   * Basado en el tamaño del archivo
+   */
+  shouldUseDirectS3Upload(fileSize) {
+    const TRADITIONAL_LIMIT = 50 * 1024 * 1024 // 50MB
+    return fileSize > TRADITIONAL_LIMIT
+  }
+
+  /**
+   * Upload inteligente que selecciona automáticamente el método
+   */
+  async smartUpload(file, version, releaseNotes = '', minAndroidVersion = '5.0', targetSdkVersion = 33, onProgress = null) {
+    if (this.shouldUseDirectS3Upload(file.size)) {
+      console.log(`📤 Archivo grande (${(file.size / 1024 / 1024).toFixed(2)}MB) - usando upload directo a S3`)
+      return await this.uploadApkToS3(file, version, releaseNotes, minAndroidVersion, targetSdkVersion, onProgress)
+    } else {
+      console.log(`📤 Archivo pequeño (${(file.size / 1024 / 1024).toFixed(2)}MB) - usando upload tradicional`)
+      const formData = new FormData()
+      formData.append('apk', file)
+      formData.append('version', version)
+      formData.append('releaseNotes', releaseNotes)
+      formData.append('minAndroidVersion', minAndroidVersion)
+      formData.append('targetSdkVersion', targetSdkVersion)
+      
+      return await this.uploadApk(formData, onProgress)
     }
+  }
+
+  /**
+   * Validar versión semver
+   */
+  isValidVersion(version) {
+    // Regex simplificado para semver (MAJOR.MINOR.PATCH con prerelease y build opcionales)
+    const semverRegex = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-((?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*)(?:\.(?:0|[1-9]\d*|\d*[a-zA-Z-][0-9a-zA-Z-]*))*))?(?:\+([0-9a-zA-Z-]+(?:\.[0-9a-zA-Z-]+)*))?$/
+    return semverRegex.test(version)
+  }
+
+  /**
+   * Formatear tamaño de archivo
+   */
+  formatFileSize(bytes) {
+    if (bytes === 0) return '0 Bytes'
+    const k = 1024
+    const sizes = ['Bytes', 'KB', 'MB', 'GB']
+    const i = Math.floor(Math.log(bytes) / Math.log(k))
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i]
+  }
+
+  /**
+   * Formatear fecha
+   */
+  formatDate(date) {
+    return new Date(date).toLocaleString('es-ES', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit'
+    })
   }
 }
 
-export default ApiService
+export default new ApiService()
